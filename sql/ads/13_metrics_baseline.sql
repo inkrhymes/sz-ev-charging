@@ -1,6 +1,8 @@
 -- 上一时刻 naive 基线 → ads_baseline_naive
 USE sz_ev;
 
+-- 幂等：重跑前清空
+TRUNCATE TABLE ads_baseline_naive;
 INSERT INTO ads_baseline_naive (taz_id, ts_hour, y_true, y_hat_lag1, abs_err)
 SELECT
   taz_id,

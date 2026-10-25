@@ -1,6 +1,8 @@
 -- 片区小时占用 → ads_zone_occupancy_hour
 USE sz_ev;
 
+-- 幂等：重跑前清空
+TRUNCATE TABLE ads_zone_occupancy_hour;
 INSERT INTO ads_zone_occupancy_hour (taz_id, ts_hour, occupancy, load_kw_est)
 SELECT
   z.taz_id,

@@ -1,4 +1,6 @@
 -- 城市日概览（按演示子集 dwd 回填；兼容 only_full_group_by）
+-- 幂等：重跑前清空
+TRUNCATE TABLE ads_city_overview;
 INSERT INTO ads_city_overview (dt, station_cnt, zone_cnt, avg_occupancy, peak_hour, stuck_cnt, high_missing_cnt)
 SELECT
   d.dt,
