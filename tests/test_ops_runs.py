@@ -107,28 +107,37 @@ def client(monkeypatch):
 def test_runs_list(client):
     d = client.get("/api/ops/runs?from=2022-10-26&to=2022-10-27").get_json()["data"]
     assert d["counts"] == {"success": 1, "blocked": 1}
-    a, b = d["days"]
+    a, b = d["runs"]
     assert a["status"] == "success" and a["complete"] and a["tasks_success"] == 7 and a["duration_s"] == 14.0
-    assert b["status"] == "blocked" and b["blocked_at"] == "dq_dwd" and b["block_reason"] == "838 个站断数"
+    assert a["started_at"] == "2026-10-25 13:00:00" and a["ended_at"] == "2026-10-25 13:00:08"
+    assert set(a["steps"][0]) >= {"name", "status", "started_at", "ended_at", "duration_s", "error"}
+    assert b["status"] == "blocked" and b["blocked_at"] == "dq_dwd" and b["error"] == "838 个站断数"
     assert b["complete"] is False and b["attempts"] == 4
 
 
 def test_runs_filter_and_validation(client):
-    assert [x["ds"] for x in client.get("/api/ops/runs?from=2022-10-27").get_json()["data"]["days"]] == ["2022-10-27"]
+    assert [x["ds"] for x in client.get("/api/ops/runs?from=2022-10-27").get_json()["data"]["runs"]] == ["2022-10-27"]
     assert client.get("/api/ops/runs?from=10/27").status_code == 400
 
 
 def test_run_day_detail(client):
     d = client.get("/api/ops/runs/2022-10-27").get_json()["data"]
-    t = {x["task_id"]: x for x in d["tasks"]}
-    assert [x["task_id"] for x in d["tasks"]][:7] == ["ods_ingest", "dq_ods", "dwd_build", "dq_dwd",
+    t = {x["name"]: x for x in d["steps"]}
+    assert [x["name"] for x in d["steps"]][:7] == ["ods_ingest", "dq_ods", "dwd_build", "dq_dwd",
                                                       "ads_build", "dq_ads", "publish"]
-    assert t["dq_dwd"]["state"] == "blocked"          # 取最近一次尝试
-    assert t["dq_ods"]["state"] == "not_recorded"
+    assert t["dq_dwd"]["status"] == "blocked"          # 取最近一次尝试
+    assert t["dq_dwd"]["error"] == "838 个站断数" and d["error"] == "838 个站断数"
+    assert t["dq_ods"]["status"] == "not_recorded"
     assert t["dq_dwd"]["label"] == "清洗层质检"
-    assert len(d["history"]) == 4 and d["history"][1]["state"] == "failed"
+    assert len(d["history"]) == 4 and d["history"][1]["status"] == "failed"
     assert client.get("/api/ops/runs/2022-01-01").status_code == 404
     assert client.get("/api/ops/runs/bad").status_code == 400
+
+
+def test_runs_alias_same_as_ops(client):
+    a = client.get("/api/runs?from=2022-10-26").get_json()
+    assert a == client.get("/api/ops/runs?from=2022-10-26").get_json()
+    assert client.get("/api/runs/2022-10-27").get_json() == client.get("/api/ops/runs/2022-10-27").get_json()
 
 
 def test_runs_db_down_is_503(monkeypatch):

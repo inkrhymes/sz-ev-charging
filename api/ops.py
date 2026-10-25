@@ -26,11 +26,25 @@ def _ts(v):
 
 
 def _row(r: dict) -> dict:
-    return {"task_id": r["task_id"], "label": TASK_LABEL.get(r["task_id"], r["task_id"]), "state": r["state"],
-            "start_ts": _ts(r["start_ts"]), "end_ts": _ts(r["end_ts"]),
+    """一个步骤（steps[] 的元素）。"""
+    return {"name": r["task_id"], "label": TASK_LABEL.get(r["task_id"], r["task_id"]), "status": r["state"],
+            "started_at": _ts(r["start_ts"]), "ended_at": _ts(r["end_ts"]),
             "duration_s": None if r["duration_s"] is None else round(float(r["duration_s"]), 3),
-            "block_reason": r["block_reason"], "source": r["source"],
-            "source_label": SOURCE_LABEL.get(r["source"], r["source"]), "dag_id": r["dag_id"]}
+            "error": r["block_reason"], "source": r["source"],
+            "source_label": SOURCE_LABEL.get(r["source"], r["source"])}
+
+
+def _steps(rows: list[dict]) -> list[dict]:
+    """按链路顺序列出每个步骤的最近一次结果；主链里没记录的步骤给 not_recorded。"""
+    last = latest_per_task(rows)
+    out = []
+    for t in CHAIN + EXTRA + sorted(set(last) - set(CHAIN) - set(EXTRA)):
+        if t in last:
+            out.append(_row(last[t]))
+        elif t in CHAIN:
+            out.append({"name": t, "label": TASK_LABEL[t], "status": "not_recorded", "started_at": None,
+                        "ended_at": None, "duration_s": None, "error": None, "source": None, "source_label": None})
+    return out
 
 
 def latest_per_task(rows: list[dict]) -> dict[str, dict]:
@@ -58,13 +72,14 @@ def day_summary(ds: str, rows: list[dict]) -> dict:
     durs = [float(r["duration_s"]) for r in last.values() if r["duration_s"] is not None]
     return {
         "ds": ds, "status": status,
+        "started_at": _ts(min(r["start_ts"] for r in last.values())),
+        "ended_at": _ts(max((r["end_ts"] or r["start_ts"]) for r in last.values())),
+        "duration_s": round(sum(durs), 3),
+        "error": last[at]["block_reason"] if at else None,
+        "steps": _steps(rows),
         "blocked_at": at, "blocked_at_label": TASK_LABEL.get(at) if at else None,
-        "block_reason": last[at]["block_reason"] if at else None,
         "complete": all(t in last for t in CHAIN),
         "tasks_total": len(last), "tasks_success": sum(s == "success" for s in states.values()),
-        "duration_s": round(sum(durs), 3),
-        "start_ts": _ts(min(r["start_ts"] for r in last.values())),
-        "end_ts": _ts(max((r["end_ts"] or r["start_ts"]) for r in last.values())),
         "attempts": len(rows),
     }
 
@@ -74,6 +89,7 @@ def register(app, sql, ok, err):
         return rows is None
 
     @app.get("/api/ops/runs")
+    @app.get("/api/runs", endpoint="runs_alias")  # 别名，前端「调度运行」页直接读
     def ops_runs():
         f, t = request_args("from"), request_args("to")
         for v in (f, t):
@@ -94,10 +110,10 @@ def register(app, sql, ok, err):
         cnt = {}
         for d in days:
             cnt[d["status"]] = cnt.get(d["status"], 0) + 1
-        return ok({"from": f, "to": t, "days": days, "counts": cnt, "chain": CHAIN,
-                   "labels": TASK_LABEL})
+        return ok({"from": f, "to": t, "runs": days, "counts": cnt, "chain": CHAIN, "labels": TASK_LABEL})
 
     @app.get("/api/ops/runs/<ds>")
+    @app.get("/api/runs/<ds>", endpoint="run_day_alias")
     def ops_run_day(ds):
         if not _DS.match(ds):
             return err("ds 必须是 YYYY-MM-DD")
@@ -106,17 +122,7 @@ def register(app, sql, ok, err):
             return err("运行记录需要 MySQL（ops_task_run），当前读不到", 503)
         if not rows:
             return err(f"{ds} 没有运行记录", 404)
-        last = latest_per_task(rows)
-        order = CHAIN + EXTRA + sorted(set(last) - set(CHAIN) - set(EXTRA))
-        tasks = []
-        for tname in order:
-            if tname in last:
-                tasks.append(_row(last[tname]))
-            elif tname in CHAIN:
-                tasks.append({"task_id": tname, "label": TASK_LABEL[tname], "state": "not_recorded",
-                              "start_ts": None, "end_ts": None, "duration_s": None, "block_reason": None,
-                              "source": None, "source_label": None, "dag_id": None})
-        return ok({**day_summary(ds, rows), "tasks": tasks, "history": [_row(r) for r in rows]})
+        return ok({**day_summary(ds, rows), "history": [_row(r) for r in rows]})
 
     return app
 
