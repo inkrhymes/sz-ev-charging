@@ -371,6 +371,29 @@ def overview():
     )
 
 
+@app.get("/api/site/suggest")
+def site_suggest():
+    """选址/加桩建议：ads_zone_site_suggest 最新一批，按 rank 升序取前 top 个（默认 20，最多 331）。
+    只在 MySQL 模式下有数据；文件模式或表不存在/为空时返回空列表。"""
+    try:
+        top = max(1, min(int(request.args.get("top", 20)), 331))
+    except ValueError:
+        return err("top 必须是整数", 400)
+    if not use_mysql():
+        return ok({"source": "none", "run_dt": None, "items": []})
+    r = _sql("SELECT run_dt, taz_id, center_lon, center_lat, station_cnt, piles, rated_kw, avg_occupancy, peak_occupancy,"
+             " busy_hours_ratio, demand_score, supply_score, gap_score, suggest_add_piles, `rank`, function_tag, reason"
+             " FROM ads_zone_site_suggest WHERE run_dt=(SELECT MAX(run_dt) FROM ads_zone_site_suggest)"
+             " ORDER BY `rank` IS NULL, `rank`, gap_score DESC LIMIT %s", (top,))
+    if not r:
+        return ok({"source": "none" if r is None else "mysql", "run_dt": None, "items": []})
+    nums = {"center_lon": 6, "center_lat": 6, "rated_kw": 2, "avg_occupancy": 4, "peak_occupancy": 4,
+            "busy_hours_ratio": 4, "demand_score": 4, "supply_score": 4, "gap_score": 4}
+    items = [{k: (str(v) if k == "taz_id" else _num(v, nums[k]) if k in nums else v)
+              for k, v in x.items() if k != "run_dt"} for x in r]
+    return ok({"source": "mysql", "run_dt": str(r[0]["run_dt"])[:10], "items": items})
+
+
 @app.get("/api/realtime/zones")
 def realtime_zones():
     """准实时：每个片区最新一个 15 分钟窗口（rt_zone_occupancy，由 stream/zone_occupancy_stream.py 写入）。
