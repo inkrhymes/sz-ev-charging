@@ -7,7 +7,8 @@ import pytest
 @pytest.fixture()
 def client():
     app_mod = importlib.import_module("app")
-    app_mod._TICKETS = None  # 每个用例重置内存工单
+    app_mod._TICKETS = None
+    app_mod._ALERTS = None  # 每个用例重置内存工单
     app_mod.app.config["TESTING"] = True
     return app_mod.app.test_client()
 
@@ -81,11 +82,26 @@ def test_login_roles(client):
     assert client.post("/api/auth/login", json={"role": "root"}).status_code == 400
 
 
-def test_ticket_patch(client):
-    assert data(client.patch("/api/tickets/1", json={"status": "processing"}))["status"] == "processing"
-    bad = client.patch("/api/tickets/1", json={"status": "x"})
+ADMIN = {"Authorization": "Bearer demo-admin"}
+RO = {"Authorization": "Bearer demo-readonly"}
+
+
+def test_ticket_patch_admin(client):
+    assert data(client.patch("/api/tickets/1", json={"status": "processing"}, headers=ADMIN))["status"] == "processing"
+    bad = client.patch("/api/tickets/1", json={"status": "x"}, headers=ADMIN)
     assert bad.status_code == 400 and bad.get_json()["ok"] is False
-    assert client.patch("/api/tickets/999", json={"status": "done"}).status_code == 404
+    assert client.patch("/api/tickets/999", json={"status": "done"}, headers=ADMIN).status_code == 404
+
+
+@pytest.mark.parametrize("path,status", [("/api/tickets/1", "done"), ("/api/alerts/1", "closed")])
+def test_patch_role_from_token(client, path, status):
+    r = client.patch(path, json={"status": status}, headers=RO)
+    assert r.status_code == 403 and "只读" in r.get_json()["error"]
+    # 请求体里自称 admin 也不行
+    assert client.patch(path, json={"status": status, "role": "admin"}, headers=RO).status_code == 403
+    assert client.patch(path, json={"status": status, "role": "admin"}).status_code == 401
+    assert client.patch(path, json={"status": status}, headers={"Authorization": "Bearer forged"}).status_code == 401
+    assert data(client.patch(path, json={"status": status}, headers=ADMIN))["status"] == status
 
 
 def test_cors_preflight(client):

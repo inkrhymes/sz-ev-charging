@@ -309,8 +309,24 @@ def tickets_list():
     return ok(tickets_store())
 
 
+def _require_admin():
+    """角色只认请求头 Authorization: Bearer <token>（token 由 /api/auth/login 下发，形如 demo-admin），不信任请求体里的 role。
+    返回 None 表示放行，否则返回错误响应。"""
+    h = request.headers.get("Authorization", "")
+    token = h[7:].strip() if h.lower().startswith("bearer ") else ""
+    role = {"demo-admin": "admin", "demo-readonly": "readonly"}.get(token)
+    if role is None:
+        return err("未登录或登录已失效，请先登录", 401)
+    if role != "admin":
+        return err("访客为只读权限，无法修改，请使用管理员登录", 403)
+    return None
+
+
 @app.patch("/api/tickets/<int:ticket_id>")
 def tickets_patch(ticket_id):
+    denied = _require_admin()
+    if denied:
+        return denied
     body = request.get_json(silent=True) or {}
     status = body.get("status")
     if status not in {"open", "processing", "done"}:
@@ -485,12 +501,13 @@ def alerts_list():
 
 @app.patch("/api/alerts/<int:alert_id>")
 def alerts_patch(alert_id):
+    denied = _require_admin()
+    if denied:
+        return denied
     body = request.get_json(silent=True) or {}
     status = body.get("status")
     if status not in {"open", "processing", "closed"}:
         return err("status must be open|processing|closed")
-    if (body.get("role") or "readonly") != "admin":
-        return err("no permission", 403)
     for a in alerts_store():
         if a["alert_id"] == alert_id:
             a["status"] = status
