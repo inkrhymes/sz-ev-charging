@@ -131,3 +131,8 @@ export_ads_mysql.py --ds 2022-09-01，真实写回 sz_ev，总耗时 8.5s：
 总墙钟 122 s。各步：register_ext_dwd 87,679,296 行 4.11s；zone_hour 1,338,568 行 27.4s；quality_station_day 304,442 行 48.19s；zone_occupancy_hour 3.57s；baseline_naive 6.13s；city_overview 181 行 5.11s；zone_daily 59,911 行 4.42s；station_busy_day 181 天 4.98s；quality_summary 3.42s；落湖 ads/zone_hour 2.59s、ads/zone_daily 1.39s。
 写回 MySQL（export_ads_mysql --start/--end，写回前先清空 5 张 ads 表的演示行）总墙钟 63 s：city_overview 181 行 6.37s，zone_occupancy_hour 1,338,568 行 23.63s，baseline_naive 1,338,568 行 27.14s，zone_daily 59,911 行 2.75s，dim_station 1,682 行 0.17s，quality_summary 4 行 0.17s。
 全量 quality_summary：station_cnt 1682，row_missing_rate 0.211628，stuck_station_cnt 6，high_missing_station_cnt 259。
+
+### 6.2 全区间 ads_build 重跑（带 load_kw_est / power_coverage，2026-10-25 13:54，local[2] / driver 2g）
+
+总墙钟 119 s，只刷新 Hive 和数据湖，没有写回 MySQL（MySQL 里的数据已经是对的）。各步：station_info 1,682 行 6.22s；register_ext_dwd 87,679,296 行 3.76s；zone_hour 1,338,568 行 28.79s；quality_station_day 304,442 行 46.59s；zone_occupancy_hour 3.43s；baseline_naive 5.57s；city_overview 181 行 3.99s；zone_daily 59,911 行 4.13s；station_busy_day 181 天 5.11s；quality_summary 3.36s；落湖 ads/zone_hour 2.77s、ads/zone_daily 1.38s。运行期间每 2 秒采一次可用内存，最低 5,610 MB。
+和 MySQL 对账：ads.zone_occupancy_hour 共 1,338,568 行，load_kw_est 有值 742,363 行，power_coverage 有值 1,338,568 行，三项都和 ads_zone_occupancy_hour 一致。抽查片区 595 的 7 个小时（含 2022-09-01 18:00 = 6708.00），数值全部相同。
