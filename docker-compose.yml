@@ -26,6 +26,13 @@ services:
       FLASK_ENV: development
       REPO_ROOT: /repo
       MOCK: "0"
+      # 整个 API（含地图/告警/工单）读库；改成 file 则全部读本机文件
+      API_SOURCE: ${API_SOURCE:-mysql}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: ${MYSQL_USER:-ev}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-evpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sz_ev}
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:

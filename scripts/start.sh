@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${MYSQL_ROOT_PASSWORD:=rootpass}" "${MYSQL_DATABASE:=sz_ev}" "${MYSQL_USER:=ev}" "${MYSQL_PASSWORD:=evpass}" "${MYSQL_PORT:=3306}"
-export MYSQL_ROOT_PASSWORD MYSQL_DATABASE MYSQL_USER MYSQL_PASSWORD MYSQL_PORT
+: "${API_SOURCE:=mysql}"  # API 全部接口（含地图/告警/工单）读库；设为 file 则读本机文件
+export MYSQL_ROOT_PASSWORD MYSQL_DATABASE MYSQL_USER MYSQL_PASSWORD MYSQL_PORT API_SOURCE
 
 # 自动准备 Python 虚拟环境（兼容 Linux/macOS 与 Windows Git Bash）
 if [ ! -d .venv ]; then

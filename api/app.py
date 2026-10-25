@@ -3,7 +3,7 @@
 环境：MOCK=1 强制假数据；REPO_ROOT 可改仓库根。
 API_SOURCE=mysql 时 overview / zones / zone/series / baseline / quality 改读 MySQL（sz_ev 的 ads_* 表，
 连接用 MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASSWORD/MYSQL_DATABASE）；返回字段不变，库里无数据或连不上时退回文件模式。
-地图接口由 MAP_DB=mysql 单独控制（见 _map_db）。
+地图 / 告警 / 工单也跟随 API_SOURCE=mysql；MAP_DB、ALERT_DB 仍可单独覆盖（=mysql 强制开，=file/memory 强制关），见 _db_on。
 """
 from __future__ import annotations
 
@@ -72,6 +72,12 @@ def use_file() -> bool:
 # ---- MySQL 数据源（API_SOURCE=mysql 启用；默认仍为文件模式）----
 def use_mysql() -> bool:
     return (not FORCE_MOCK) and os.getenv("API_SOURCE", "file").lower() == "mysql"
+
+
+def _db_on(override: str) -> bool:
+    """某块功能是否走 MySQL：单独的开关变量（MAP_DB / ALERT_DB）有值时以它为准，否则跟随 API_SOURCE。"""
+    v = os.getenv(override, "").strip().lower()
+    return v == "mysql" if v else use_mysql()
 
 
 def _sql(query: str, args=()) -> list[dict] | None:
@@ -498,7 +504,7 @@ def baseline():
                "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
 
 
-# 工单：ALERT_DB=mysql 时存 ads_ticket（含 alert_id 列，见 sql/migrations/20261025_ads_ticket_alert_id.sql），否则进程内存
+# 工单：API_SOURCE=mysql（或 ALERT_DB=mysql）时存 ads_ticket（含 alert_id 列，见 sql/migrations/20261025_ads_ticket_alert_id.sql），否则进程内存
 def _ticket_out(r: dict) -> dict:
     fmt = lambda v: None if v is None else str(v)[:16]
     return {"ticket_id": r["ticket_id"], "station_id": r["station_id"], "type": r["type"], "status": r["status"],
@@ -569,7 +575,7 @@ def tickets_patch(ticket_id):
 @app.post("/api/tickets")
 def tickets_create():
     """从告警派工单：{station_id, type?, alert_id?}。带 alert_id 时同一条告警只派一次，并把告警改成处理中（ack）。
-    ALERT_DB=mysql 时写 ads_ticket，否则存进程内存。"""
+    API_SOURCE=mysql（或 ALERT_DB=mysql）时写 ads_ticket，否则存进程内存。"""
     denied = _require_admin()
     if denied:
         return denied
@@ -772,8 +778,8 @@ def _lake_map():
 
 
 def _mysql_map():
-    """MAP_DB=mysql 时优先读库：dim_station（站点坐标）+ ads_zone_daily（片区日均、中心点，取最新一天）。连不上就返回 None。"""
-    if os.getenv("MAP_DB", "").lower() != "mysql":
+    """API_SOURCE=mysql（或 MAP_DB=mysql）时优先读库：dim_station（站点坐标）+ ads_zone_daily（片区日均、中心点，取最新一天）。连不上就返回 None。"""
+    if not _db_on("MAP_DB"):
         return None
     try:
         import pymysql
@@ -854,12 +860,12 @@ ALERT_LEVEL = {"stuck": "high", "high_missing": "medium", "long_gap": "low"}
 ALERT_STATES = {"open", "ack", "closed"}
 _ALERTS: list[dict] | None = None
 
-# MySQL 表 dq_alert（小白在 quality/sql/ 下建表）。设置 ALERT_DB=mysql 才启用，否则用内存。
+# MySQL 表 dq_alert（小白在 quality/sql/ 下建表）。API_SOURCE=mysql 或 ALERT_DB=mysql 时启用，否则用内存。
 # 表结构见 quality/sql/dq_alert.sql（主键 alert_id，状态 open/ack/closed）。
 
 
 def _alert_db():
-    if os.getenv("ALERT_DB", "").lower() != "mysql":
+    if not _db_on("ALERT_DB"):
         return None
     try:
         import pymysql

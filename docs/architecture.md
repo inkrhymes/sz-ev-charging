@@ -132,3 +132,5 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 **全量数据（小黄补充）**：设置 `SZ_EV_LAKE=<lake 根目录>` 后，`/api/map/zones` 直接读 `ods/station_info`（站点坐标、所属片区）和 `ads/zone_hour`（按片区把逐小时占用率求平均），有 `dwd/quality_station` 时顺带给出每站缺数比例；站点超过 300 个时不一次返回，前端点片区时再用 `?taz_id=` 取。没设或文件不全时退回演示数据。告警表按 `quality/sql/dq_alert.sql` 读写（`alert_id`、`ds`、`layer`、`rule_name`、`severity`、`metric_value`、`threshold`、`note`），改状态时同时更新 `updated_at`；整批规则产生的告警没有站和片区，页面显示「整批数据」。
 
 **地图数据来源顺序（小黄补充）**：`MAP_DB=mysql` 时先读库（`dim_station` + `ads_zone_daily` 最新一天）；连不上或没设时读 `SZ_EV_LAKE`（默认 `data/lake`）下的 `ods/station_info` + `ads/zone_hour`，片区中心优先用 `center_lon/center_lat`，没有占用率的小时用 `busy_sum/piles_sum` 补；都没有才用演示 CSV。未知 `/api/*` 路径回 404（以前回 405，容易误以为方法错）。
+
+**读库开关统一（小黄补充）**：`API_SOURCE=mysql` 一个变量就让全部接口读写 MySQL（总览、片区、对比、质量，以及地图 `dim_station`/`ads_zone_daily`、告警 `dq_alert`、工单 `ads_ticket`）；`MAP_DB`、`ALERT_DB` 保留作单独覆盖：设为 `mysql` 强制读库，设为 `file`/`memory` 强制不读库，不设则跟随 `API_SOURCE`。连接一律 `SET time_zone='+08:00'`。`scripts/start.sh` 与 `docker-compose.yml` 默认传 `API_SOURCE=mysql` 和 `MYSQL_*`（容器内 `MYSQL_HOST=mysql`），想看本机文件就 `API_SOURCE=file`。告警被复查自动关闭时状态为已关闭，页面在状态下显示备注（如「复查已通过（自动关闭）」）。

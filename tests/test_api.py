@@ -187,3 +187,18 @@ def test_ticket_from_alert(client):
     assert d["ticket"]["alert_id"] == a["alert_id"] and d["alert"]["status"] == "ack"
     assert client.post("/api/tickets", json=body, headers=ADMIN).status_code == 409
     assert any(t.get("alert_id") == a["alert_id"] for t in client.get("/api/tickets").get_json()["data"])
+
+
+def test_db_switch_follows_api_source(monkeypatch):
+    import app as appmod
+    for k in ("API_SOURCE", "MAP_DB", "ALERT_DB", "MOCK"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(appmod, "FORCE_MOCK", False, raising=False)
+    assert not appmod._db_on("ALERT_DB")
+    monkeypatch.setenv("API_SOURCE", "mysql")
+    assert appmod._db_on("ALERT_DB") and appmod._db_on("MAP_DB")
+    monkeypatch.setenv("ALERT_DB", "memory")
+    assert not appmod._db_on("ALERT_DB")
+    monkeypatch.delenv("API_SOURCE")
+    monkeypatch.setenv("MAP_DB", "mysql")
+    assert appmod._db_on("MAP_DB")
