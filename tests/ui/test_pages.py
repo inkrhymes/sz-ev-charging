@@ -191,3 +191,19 @@ def test_runs_page_is_paged(browser):
     assert "not_recorded" not in text and "success" not in text
     assert not probs["js"], probs["js"]
     pg.close()
+
+
+def test_fmt_dur_hours_and_minutes(browser):
+    pg, probs = open_page(browser)
+    pg.goto(f"{UI_BASE}#/tickets")
+    pg.wait_for_load_state("networkidle")
+    f = lambda m: pg.evaluate(f"fmtDur({m} * 60000)")
+    assert f(27) == "27 分钟"
+    assert f(165) == "2 小时 45 分"
+    assert f(120) == "2 小时"
+    assert f(192) == "3 小时 12 分"
+    assert f(50 * 60 + 30) == "2 天 2 小时"
+    text = pg.inner_text("#view-tickets")
+    import re as _re
+    assert not _re.search(r"\d+\.\d+ 小时", text), "处理用时不该再出现小数小时"
+    pg.close()
