@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 
 app = Flask(__name__)
 
@@ -80,21 +80,63 @@ def _db_on(override: str) -> bool:
     return v == "mysql" if v else use_mysql()
 
 
-def _sql(query: str, args=()) -> list[dict] | None:
-    """执行只读查询；连不上或出错返回 None，调用方据此退回文件模式。"""
+class MySQLUnavailable(Exception):
+    """API_STRICT_MYSQL=1 时 MySQL 不可用，直接 503，不退回文件。"""
+
+
+def strict_mysql() -> bool:
+    return os.getenv("API_STRICT_MYSQL", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _mysql_failed(e: Exception) -> None:
+    """MySQL 模式下读库失败：记录到本次请求（响应头 X-Data-Fallback / /api/health 可见），并打日志；严格模式直接抛出 → 503。"""
+    msg = f"{type(e).__name__}: {e}"
     try:
-        import pymysql
-        conn = pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
-                               user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
-                               database=os.getenv("MYSQL_DATABASE", os.getenv("MYSQL_DB", "sz_ev")), charset="utf8mb4", init_command="SET time_zone='+08:00'",
-                               cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
-    except Exception:
+        g.mysql_error = msg
+    except RuntimeError:  # 不在请求上下文
+        pass
+    app.logger.warning("MySQL 不可用，%s：%s", "严格模式返回 503" if strict_mysql() else "本次退回文件/内存数据", msg)
+    if strict_mysql():
+        raise MySQLUnavailable(msg)
+
+
+@app.errorhandler(MySQLUnavailable)
+def _on_mysql_unavailable(e):
+    return jsonify({"ok": False, "error": f"MySQL 不可用（API_STRICT_MYSQL=1，不退回文件）：{e}",
+                    "source": "mysql", "fallback": False, "mysql_error": str(e)}), 503
+
+
+@app.after_request
+def _data_source_headers(resp):
+    """MySQL 模式下每个 /api 响应都带上实际数据源，退回文件时不再“悄悄”。"""
+    if use_mysql() and request.path.startswith("/api/"):
+        err_msg = getattr(g, "mysql_error", None)
+        resp.headers["X-Data-Source"] = "file" if err_msg else "mysql"
+        resp.headers["X-Data-Fallback"] = "true" if err_msg else "false"
+    return resp
+
+
+def _mysql_connect():
+    import pymysql
+    return pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
+                           user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
+                           database=os.getenv("MYSQL_DATABASE", os.getenv("MYSQL_DB", "sz_ev")), charset="utf8mb4",
+                           init_command="SET time_zone='+08:00'", cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
+
+
+def _sql(query: str, args=()) -> list[dict] | None:
+    """执行只读查询；连不上或出错返回 None（并记录 fallback），调用方据此退回文件模式；严格模式下抛 503。"""
+    try:
+        conn = _mysql_connect()
+    except Exception as e:
+        _mysql_failed(e)
         return None
     try:
         with conn.cursor() as cur:
             cur.execute(query, args)
             return list(cur.fetchall())
-    except Exception:
+    except Exception as e:
+        _mysql_failed(e)
         return None
     finally:
         conn.close()
@@ -234,13 +276,27 @@ def tickets_store():
 
 @app.get("/api/health")
 def health():
-    return ok(
-        {
-            "service": "sz-ev-api",
-            "mode": "mysql" if use_mysql() else ("file" if use_file() else "mock"),
-            "dwd": str(DWD),
-        }
-    )
+    """mode=配置的数据源；source=实际能用的数据源；fallback=配置了 mysql 但连不上、正在退回文件。"""
+    mode = "mysql" if use_mysql() else ("file" if use_file() else "mock")
+    data = {"service": "sz-ev-api", "mode": mode, "dwd": str(DWD), "source": mode if mode != "mysql" else "mysql",
+            "fallback": False, "mysql_error": None, "strict_mysql": strict_mysql()}
+    if mode == "mysql":
+        try:
+            conn = _mysql_connect()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            finally:
+                conn.close()
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            g.mysql_error = msg
+            app.logger.warning("MySQL 健康检查失败：%s", msg)
+            data.update(mysql_error=msg)
+            if strict_mysql():
+                return jsonify({"ok": False, "data": data, "error": "MySQL 不可用（API_STRICT_MYSQL=1）"}), 503
+            data.update(source="file" if use_file() else "mock", fallback=True)
+    return ok(data)
 
 
 @app.get("/api/overview")
@@ -521,7 +577,8 @@ def _ticket_db_call(fn):
             r = fn(cur)
             con.commit()
             return True, r
-    except Exception:
+    except Exception as e:
+        _mysql_failed(e)
         return False, None
 
 
@@ -793,7 +850,8 @@ def _mysql_map():
             cur.execute("SELECT taz_id, avg_occupancy, station_cnt, pile_cnt, center_lon, center_lat FROM ads_zone_daily "
                         "WHERE dt = (SELECT MAX(dt) FROM ads_zone_daily)")
             zd = {str(r["taz_id"]): r for r in cur.fetchall()}
-    except Exception:
+    except Exception as e:
+        _mysql_failed(e)
         return None
     if not si:
         return None
@@ -873,8 +931,9 @@ def _alert_db():
                                user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
                                database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", init_command="SET time_zone='+08:00'",
                                cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
-    except Exception:
-        return None  # 连不上就退回内存
+    except Exception as e:
+        _mysql_failed(e)
+        return None  # 连不上就退回内存（已记录 fallback；严格模式 503）
 
 
 def _norm_alert(r: dict) -> dict:
@@ -933,7 +992,8 @@ def alerts_read() -> tuple[list[dict], str]:
             with con, con.cursor() as cur:
                 cur.execute("SELECT * FROM dq_alert ORDER BY created_at DESC LIMIT 1000")
                 return [_norm_alert(r) for r in cur.fetchall()], "mysql"
-        except Exception:
+        except Exception as e:
+            _mysql_failed(e)
             pass
     return alerts_store(), "memory"
 
@@ -953,7 +1013,8 @@ def alerts_write(alert_id: int, status: str, note: str | None):
                     cur.execute("SELECT * FROM dq_alert WHERE alert_id=%s", (alert_id,))
                     return _norm_alert(cur.fetchone())
                 return None
-        except Exception:
+        except Exception as e:
+            _mysql_failed(e)
             pass
     for a in alerts_store():
         if a["alert_id"] == alert_id:

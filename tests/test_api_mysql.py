@@ -68,6 +68,67 @@ def test_mysql_unreachable_falls_back_to_file(app_mod, monkeypatch):
     assert d["station_cnt"] == 25
 
 
+def _boom():
+    raise ConnectionError("can't connect to mysql:3306 (timed out)")
+
+
+class _OkConn:
+    def cursor(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, *a):
+        return 1
+
+    def close(self):
+        pass
+
+
+def test_unreachable_fallback_is_visible(app_mod, monkeypatch):
+    """非严格：退回文件，但响应头和 /api/health 都说明实际数据源与错误。"""
+    monkeypatch.delenv("API_STRICT_MYSQL", raising=False)
+    monkeypatch.setattr(app_mod, "_mysql_connect", _boom)
+    c = app_mod.app.test_client()
+    r = c.get("/api/overview?dt=2022-09-01")
+    assert data(r)["station_cnt"] == 25
+    assert r.headers["X-Data-Source"] == "file" and r.headers["X-Data-Fallback"] == "true"
+    h = data(c.get("/api/health"))
+    assert h["mode"] == "mysql" and h["source"] == "file" and h["fallback"] is True
+    assert "timed out" in h["mysql_error"] and h["strict_mysql"] is False
+
+
+def test_health_reports_mysql_when_reachable(app_mod, monkeypatch):
+    monkeypatch.setattr(app_mod, "_mysql_connect", lambda: _OkConn())
+    r = app_mod.app.test_client().get("/api/health")
+    h = data(r)
+    assert h["source"] == "mysql" and h["fallback"] is False and h["mysql_error"] is None
+    assert r.headers["X-Data-Source"] == "mysql" and r.headers["X-Data-Fallback"] == "false"
+
+
+def test_file_mode_health_unchanged(app_mod, monkeypatch):
+    monkeypatch.setenv("API_SOURCE", "file")
+    r = app_mod.app.test_client().get("/api/health")
+    h = data(r)
+    assert h["mode"] == h["source"] and h["fallback"] is False and "X-Data-Source" not in r.headers
+
+
+@pytest.mark.parametrize("path", ["/api/health", "/api/overview?dt=2022-09-01", "/api/zones", "/api/zone/series?taz_id=11",
+                                  "/api/baseline", "/api/quality", "/api/alerts", "/api/tickets"])
+def test_strict_mysql_returns_503(app_mod, monkeypatch, path):
+    monkeypatch.setenv("API_STRICT_MYSQL", "1")
+    monkeypatch.setattr(app_mod, "_mysql_connect", _boom)
+    monkeypatch.setattr(app_mod.pymysql if hasattr(app_mod, "pymysql") else __import__("pymysql"), "connect",
+                        lambda *a, **k: _boom())
+    r = app_mod.app.test_client().get(path)
+    assert r.status_code == 503, (path, r.get_json())
+    assert r.get_json()["ok"] is False
+
+
 def test_main_block_is_last():
     """python app.py 启动时 app.run() 阻塞，其后的路由不会注册（地图、告警路由在 main 之后会不生效）。"""
     tree = ast.parse((Path(__file__).resolve().parents[1] / "api" / "app.py").read_text(encoding="utf-8"))
