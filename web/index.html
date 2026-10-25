@@ -723,6 +723,8 @@
         yAxis: { type: "value", minInterval: 1 },
         series: types.map((k, i) => ({ name: TYPE_CN[k], type: "bar", stack: "t", data: ["open", "processing", "done"].map(s => ticketList.filter(t => t.type === k && t.status === s).length),
                                         itemStyle: { color: i ? "#14C9C9" : "#165DFF", borderRadius: 0 } })),
+        // 没有工单时图上直接写「暂无工单」，不画空柱子
+        graphic: ticketList.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: "暂无工单", fill: "#86909C", fontSize: 14 } }],
       }, true);
     }
 
