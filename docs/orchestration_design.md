@@ -83,6 +83,8 @@ rules:
 
 未通过的规则同时写入 `dq_alert`（DDL：`quality/sql/dq_alert.sql`，字段与告警页一致）。同一 ds / 层 / 规则只保留一条，重跑只刷新数值，不会把已处理的告警重新打开。
 
+质检被拦的那一天不会写入新数据，库里保留上一次发布的数据，并由 `dq_alert` 里的告警标出来（页面提示「显示的是上一次的数据」）。
+
 ## 7. 启停
 ```bash
 docker compose -f orchestration/docker-compose.airflow.yml up -d     # 首次约 2 分钟（初始化 airflow 库）
