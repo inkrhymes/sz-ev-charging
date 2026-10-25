@@ -34,7 +34,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = Path("/workspace/thesis_ev_data/gdrive/UrbanEV/UrbanEVDataset/20220901-20230228_station-raw")
+SRC = Path(os.environ.get("URBANEV_SRC", "/workspace/thesis_ev_data/gdrive/UrbanEV/UrbanEVDataset/20220901-20230228_station-raw"))
 LAKE = Path(os.environ.get("SZ_EV_LAKE", ROOT / "data" / "lake"))  # override to share one lake across clones
 HIGH_MISSING_THR = 0.30
 REPAIR_STUCK_DAYS = 30      # cumulative stuck days -> repair ticket
@@ -172,8 +172,9 @@ def main():
     taz = dict(zip(info.station_id.astype(int), info.TAZID.astype(int)))
     si = LAKE / "ods" / "station_info"; si.mkdir(parents=True, exist_ok=True)
     info.rename(columns={"TAZID": "taz_id"}).astype({"station_id": "int32", "taz_id": "int32"}).to_parquet(si / "part-0.parquet", index=False)
+    import sys; sys.path.insert(0, str(Path(__file__).resolve().parent))
     import pile_power  # enrich station_info with rated power columns (else this rewrite would drop them)
-    print("pile_power", pile_power.build(lake=LAKE), flush=True)
+    print("pile_power", pile_power.build(src=SRC / "pile_rated_power.csv", lake=LAKE), flush=True)
     stg = LAKE / "_staging" / f"{tag}_{os.getpid()}"  # per-process: concurrent runs on the shared box must not clobber each other
     shutil.rmtree(stg, ignore_errors=True); stg.mkdir(parents=True)
     m = {}
