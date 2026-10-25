@@ -34,6 +34,8 @@ services:
       MYSQL_USER: ${MYSQL_USER:-ev}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-evpass}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-sz_ev}
+      # 可选 Redis 读缓存：留空 = 不启用（默认）；开启见下面 redis 服务和 docs/perf/api_loadtest.md
+      REDIS_URL: ${REDIS_URL:-}
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:
@@ -45,3 +47,12 @@ services:
       mysql:
         condition: service_healthy
 
+  # 可选：API 读缓存。默认不启动，需要时：
+  #   REDIS_URL=redis://redis:6379/0 docker compose --profile cache up -d redis api
+  redis:
+    image: redis:7-alpine
+    container_name: sz-ev-redis
+    profiles: ["cache"]
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
