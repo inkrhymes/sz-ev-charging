@@ -179,3 +179,33 @@ def test_old_stuck_detail_parsed_and_rerendered():
     txt = e.render_stuck_detail("1018", "576", asof, 60, f, l)
     assert txt == ("站 1018（片区 576）到 2月28日 为止，已经有 60 天读数一动不动，"
                    "第一次出现在 9月3日，最近一次在 2月28日，建议派人去现场看看。【提醒】")
+
+
+class _CloseCur:
+    """模拟 dq_alert 的自动关闭 UPDATE：只关 open 的规则级行，note 追加。"""
+    def __init__(self, rows):
+        self.rows = rows
+
+    def execute(self, sql, args):
+        note, _, ds, layer, rule = args
+        n = 0
+        for row in self.rows:
+            if (row["ds"], row["layer"], row["rule_name"]) == (ds, layer, rule) \
+                    and row["station_id"] is None and row["status"] == "open":
+                row["status"] = "closed"
+                row["note"] = note if not row["note"] else row["note"] + "；" + note
+                n += 1
+        return n
+
+
+def test_passed_rule_closes_open_rule_alert_only():
+    base = dict(ds="2022-09-01", layer="dwd", rule_name="r1")
+    rows = [dict(base, station_id=None, status="open", note="待查"),
+            dict(base, station_id=None, status="ack", note="已派单"),
+            dict(base, station_id="7", status="open", note=None),
+            dict(base, rule_name="r2", station_id=None, status="open", note=None)]
+    r = engine.Result("r1", "range", "warn", True, "0", "")
+    assert engine.close_passed_alerts(_CloseCur(rows), [r], "dwd", "2022-09-01") == 1
+    assert rows[0]["status"] == "closed" and rows[0]["note"] == "待查；" + engine.CLOSE_NOTE
+    assert rows[1]["status"] == "ack" and rows[1]["note"] == "已派单"
+    assert rows[2]["status"] == "open" and rows[3]["status"] == "open"

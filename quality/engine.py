@@ -340,13 +340,15 @@ def render_detail(rule, ds, actual, threshold):
 def write_alerts(results, layer, ds, rules):
     """未通过的规则写入 dq_alert；同一 ds/层/规则已有告警则只刷新数值，不重置处理状态。"""
     bad = [r for r in results if not r.passed]
-    if not bad:
+    good = [r for r in results if r.passed]
+    if not results:
         return 0
     by_name = {r["name"]: r for r in rules}
     conn = _connect()
     try:
         with conn.cursor() as cur:
             cur.execute(_ddl(ALERT_DDL))
+            close_passed_alerts(cur, good, layer, ds)
             for r in bad:
                 rule = by_name.get(r.rule_name, {"type": "", "severity": r.severity})
                 act, thr = _num(r.actual), _threshold(rule)
@@ -361,6 +363,22 @@ def write_alerts(results, layer, ds, rules):
     finally:
         conn.close()
     return len(bad)
+
+
+CLOSE_NOTE = "复查已通过（自动关闭）"
+
+
+def close_passed_alerts(cur, passed, layer, ds):
+    """规则复查通过：同 ds/层/规则下仍为 open 的规则级告警自动关闭，note 追加说明。
+    不动 ack/closed 行，不动站点级（station_id 非空）行。返回关闭行数。"""
+    n = 0
+    for r in passed:
+        n += cur.execute(
+            "UPDATE dq_alert SET status='closed',"
+            " note=CASE WHEN note IS NULL OR note='' THEN %s ELSE CONCAT(note, '；', %s) END"
+            " WHERE ds=%s AND layer=%s AND rule_name=%s AND station_id IS NULL AND status='open'",
+            (CLOSE_NOTE, CLOSE_NOTE, ds, layer, r.rule_name)) or 0
+    return n
 
 
 def write_station_alerts(cur, r, layer, ds, rule):
