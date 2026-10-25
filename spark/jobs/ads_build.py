@@ -68,7 +68,8 @@ def main() -> None:
 
     ensure_dwd_tables(spark)
     aggregate(spark, perf, dates, dl, src="v_src")
-    build(spark, perf, dates, dl, src="v_src")
+    parts = [r[0].split("=", 1)[1] for r in spark.sql("SHOW PARTITIONS dwd.ext_charge_5min_clean").collect()]
+    build(spark, perf, dates, dl, src="v_src", src_parts=parts)
 
     out = Path(a.ads_output)
     t = time.time()

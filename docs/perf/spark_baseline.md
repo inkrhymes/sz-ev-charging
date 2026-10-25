@@ -84,7 +84,7 @@ export_ads_mysql.py --ds 2022-09-01，真实写回 sz_ev，总耗时 8.5s：
 ## 4. 说明
 
 - 单日作业耗时主要是 JVM 与 Spark 启动开销，计算本身只占几秒。增加天数后耗时增长很慢。
-- quality_summary 的卡死统计扫描全部已注册分区，是 ads_build 中最慢的一步。
+- quality_summary 的卡死统计原先每次扫描全部已注册分区，是 ads_build 中最慢的一步；现已改为增量（见 §6）。
 
 ## 5. MySQL 关键查询：加索引前后
 
@@ -99,3 +99,15 @@ export_ads_mysql.py --ds 2022-09-01，真实写回 sz_ev，总耗时 8.5s：
 | Q5 片区内站点 | 0.139 / 0.166 | idx_dim_station_taz | 0.146 / 0.209 | 0.195 / 0.422 | 同左（未改动） |
 
 最终保留 `sql/ads/05_ads_time_indexes.sql` 中的两个覆盖索引。Q1 加速约 2.3 倍，Q2 变化不大。Q3–Q5 的索引没有改动，前后差异属于测量波动。数据量只有万行级别，绝对耗时都在毫秒级；全区间约 134 万行时差异会更明显，但这次没有实测。
+
+## 6. quality_summary 增量化前后（ads_build --ds 2022-09-01，真实湖 181 个 dwd 分区，local[2] / driver 2g）
+
+做法：新增分区表 ads.station_busy_day（站×日：有效读数条数、min/max busy）。每次只重算本次 --ds 以及该表里还缺的源分区；quality_summary 只读这张汇总表，不再扫 dwd 明细。卡死判定从 COUNT(DISTINCT busy)=1 改为 SUM(valid_cnt)≥12 且 MIN(min_busy)=MAX(max_busy)，口径不变。
+
+| 场景 | station_busy_day 重算天数 / 耗时(s) | quality_summary 耗时(s) | ads_build 总墙钟(s) |
+|---|---|---|---|
+| 改前（全量扫明细） | — | 7.87–10.45 | 约 22–27 |
+| 改后首跑（一次性回补 181 天） | 181 / 6.35 | 1.84 | 25 |
+| 改后日常增量（仅 ds 当天） | 1 / 0.48 | 2.05 | 16 |
+
+结果校验（与改前一致）：stuck_station_cnt 6，row_missing_rate 0.114230，high_missing_station_cnt 180，station_cnt 1682。

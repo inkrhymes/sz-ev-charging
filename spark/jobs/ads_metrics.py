@@ -23,7 +23,7 @@ HIGH_MISSING_THR = 0.30
 EXPORT = Path(os.environ.get("SZ_ADS_EXPORT", ROOT / "data" / "lake" / "export" / "ads"))
 
 
-def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean"):
+def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts: list[str] | None = None):
     spark.sql("CREATE DATABASE IF NOT EXISTS ads")
     spark.sql("""CREATE TABLE IF NOT EXISTS ads.city_overview (station_cnt BIGINT, zone_cnt BIGINT,
       avg_occupancy DOUBLE, peak_hour INT, stuck_cnt BIGINT, high_missing_cnt BIGINT)
@@ -86,11 +86,26 @@ def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean"):
     perf.step("zone_daily", spark.sql(f"SELECT COUNT(*) FROM ads.zone_daily WHERE dt IN ({dl})").first()[0], t)
 
     t = time.time()
+    # 增量：卡死判定所需的“站×日”读数统计（有效读数条数、最小/最大 busy）落成分区表，
+    # 每次只重算本次日期 + 统计表里还没有的源分区（首跑一次性回补），不再全量扫描 dwd 明细。
+    # 整窗口“只有一个取值” ⇔ 各日 MIN(min_busy) = MAX(max_busy)，与原 COUNT(DISTINCT)=1 口径等价。
+    spark.sql("""CREATE TABLE IF NOT EXISTS ads.station_busy_day (station_id STRING, valid_cnt BIGINT,
+      min_busy DOUBLE, max_busy DOUBLE) PARTITIONED BY (dt STRING) STORED AS PARQUET""")
+    if src_parts is None:
+        src_parts = [r[0].split("=", 1)[1] for r in spark.sql(f"SHOW PARTITIONS {src}").collect()]
+    have = {r[0].split("=", 1)[1] for r in spark.sql("SHOW PARTITIONS ads.station_busy_day").collect()}
+    todo = sorted(set(dates) | (set(src_parts) - have))
+    spark.sql(f"""INSERT OVERWRITE TABLE ads.station_busy_day PARTITION (dt)
+      SELECT station_id, SUM(CASE WHEN is_row_missing=0 AND busy IS NOT NULL THEN 1 ELSE 0 END),
+             MIN(CASE WHEN is_row_missing=0 THEN busy END), MAX(CASE WHEN is_row_missing=0 THEN busy END), dt
+      FROM {src} WHERE dt IN ({in_list(todo)}) GROUP BY station_id, dt""")
+    perf.step("station_busy_day", len(todo), t, recomputed_days=len(todo))
+
+    t = time.time()
     spark.sql(f"""INSERT OVERWRITE TABLE ads.quality_summary
       WITH w AS (SELECT station_id,
-                        CASE WHEN SUM(CASE WHEN is_row_missing=0 AND busy IS NOT NULL THEN 1 ELSE 0 END) >= 12
-                              AND COUNT(DISTINCT CASE WHEN is_row_missing=0 THEN busy END) = 1 THEN 1 ELSE 0 END st
-                 FROM {src} GROUP BY station_id),
+                        CASE WHEN SUM(valid_cnt) >= 12 AND MIN(min_busy) = MAX(max_busy) THEN 1 ELSE 0 END st
+                 FROM ads.station_busy_day GROUP BY station_id),
       s AS (SELECT q.station_id, SUM(q.rows) r, SUM(q.missing_rows) m, MAX(w.st) st
                  FROM dwd.quality_station_day q JOIN w ON q.station_id=w.station_id GROUP BY q.station_id)
       SELECT 'station_cnt', CAST(COUNT(*) AS DOUBLE), '已入仓站点数' FROM s
