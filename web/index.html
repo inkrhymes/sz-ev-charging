@@ -204,6 +204,7 @@
       <li data-route="zone"><svg class="ic"><use href="#i-map"/></svg><span>片区分析</span></li>
       <li data-route="baseline"><svg class="ic"><use href="#i-trend"/></svg><span>和上小时比</span></li>
       <li data-route="map"><svg class="ic"><use href="#i-map"/></svg><span>片区地图</span></li>
+      <li data-route="site"><svg class="ic"><use href="#i-map"/></svg><span>选址补桩</span></li>
     </ul>
     <div class="group">数据治理</div>
     <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li>
@@ -280,6 +281,19 @@
         <div class="card-body">
           <table><thead><tr><th>数据日期</th><th>开始时间</th><th>用时</th><th>结果</th><th>各步骤</th></tr></thead><tbody id="runsBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody></table>
         </div></div>
+    </section>
+    <section class="view" id="view-site">
+      <div class="grid kpis6" id="siteSum"></div>
+      <div class="grid">
+        <div class="card col-24"><div class="card-head"><div class="card-title">片区分布<span class="tip" data-tip="红色建议加桩，橙色先观察，蓝色维持现状；点越大缺桩越厉害"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="siteExtra"></div></div>
+          <div class="card-body"><div id="chartSite" style="height:400px"></div></div></div>
+        <div class="card col-24"><div class="card-head"><div class="card-title">按缺桩程度排名<span class="readonly-note" style="margin-left:8px;font-weight:400">点片区看原因</span></div>
+          <div class="sub-filter"><div class="tabs" id="siteTabs"></div></div></div>
+          <div class="card-body">
+            <table><thead><tr><th>排名</th><th>片区</th><th>片区类型</th><th>现有桩</th><th>晚高峰占用率</th><th>缺桩程度<span class="tip" data-tip="0–100，越高越缺桩：主要看平时和晚上有多忙，也看周边 2 公里桩多不多"><svg class="ic"><use href="#i-info"/></svg></span></th><th>建议</th></tr></thead><tbody id="siteBody"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody></table>
+            <div class="pager" id="sitePager"></div>
+          </div></div>
+      </div>
     </section>
     <section class="view" id="view-quality">
       <div class="grid" id="qualityKpis"></div>
@@ -416,6 +430,7 @@
       overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
       zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
       baseline: ["运行监控", "和上小时比", "实际占用和上一小时参考值差多少"],
+      site: ["运行监控", "选址补桩", "哪些片区桩不够用、建议加几根，哪些先观察"],
       map: ["运行监控", "片区地图", "在地图上看哪片最忙，点一下看片区里的站"],
       alerts: ["运维管理", "异常告警", "数据检查发现的问题都列在这里，管理员可以跟进和关闭"],
       quality: ["数据治理", "数据质量", "采集数据有没有缺、有没有一直不动"],
@@ -440,7 +455,7 @@
     });
     const $ = id => document.getElementById(id);
     const charts = {};
-    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
+    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
     const resizeAll = () => Object.values(charts).forEach(c => c.resize());
     const pct = v => (v * 100).toFixed(0) + "%";
     const tsLabel = ts => ts.slice(5, 16);   // MM-DD HH:mm
@@ -1101,6 +1116,53 @@
     }
 
     /* ---------- 路由 / 侧栏 ---------- */
+    /* ---------- 选址补桩（读 /api/site/suggest；表还没导入时显示空状态） ---------- */
+    const SITE_KIND = { add: ["建议加桩", "danger", "#F53F3F"], watch: ["先观察", "warning", "#FF7D00"], keep: ["维持现状", "blue", "#165DFF"] };
+    const siteKind = r => (+r.suggest_add_piles > 0 ? "add" : /先观察/.test(r.reason || "") ? "watch" : "keep");
+    let siteRows = [], siteFilter = "all", sitePage = 1, siteOpen = new Set();
+    async function loadSite() {
+      let d = null;
+      try { d = await apiGet("/api/site/suggest?top=331"); } catch (e) { d = null; }
+      siteRows = ((d && d.items) || []).map(r => ({ ...r, kind: siteKind(r) }));
+      $("siteExtra").textContent = siteRows.length && d.run_dt ? `${d.run_dt} 算的` : "";
+      renderSite();
+    }
+    function renderSite() {
+      const n = k => siteRows.filter(r => r.kind === k);
+      const piles = n("add").reduce((x, r) => x + (+r.suggest_add_piles || 0), 0);
+      const empty = !siteRows.length;
+      $("siteSum").innerHTML = [["建议加桩", empty ? "—" : `${n("add").length} 个片区`, empty ? "" : `一共建议加 ${piles} 根桩`],
+        ["先观察", empty ? "—" : `${n("watch").length} 个片区`, empty ? "" : "有时紧张，再看几个月"], ["维持现状", empty ? "—" : `${n("keep").length} 个片区`, empty ? "" : "现在的桩够用"]]
+        .map(([l, v, f]) => `<div class="card col-8 kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-foot">${f}</div></div>`).join("");
+      const tabs = [["all", "全部"], ["add", "建议加桩"], ["watch", "先观察"], ["keep", "维持现状"]];
+      $("siteTabs").innerHTML = tabs.map(([k, t]) => `<div data-k="${k}" class="${k === siteFilter ? "active" : ""}">${t}<em>${k === "all" ? siteRows.length : n(k).length}</em></div>`).join("");
+      $("siteTabs").querySelectorAll("div").forEach(x => x.onclick = () => { siteFilter = x.dataset.k; sitePage = 1; renderSite(); });
+      const shown = siteRows.filter(r => siteFilter === "all" || r.kind === siteFilter), size = 10;
+      const page = shown.slice((sitePage - 1) * size, sitePage * size);
+      const pctv = v => v == null ? "—" : pct(v);
+      $("siteBody").innerHTML = empty ? `<tr><td colspan="7" class="empty">选址建议还没算好或还没导入，导入后会显示在这里</td></tr>`
+        : page.map(r => { const [cn, c] = SITE_KIND[r.kind];
+          return `<tr><td class="num">${r.rank ?? "—"}</td><td style="white-space:nowrap"><a data-sz="${escHtml(r.taz_id)}">片区 ${escHtml(r.taz_id)}</a></td><td>${escHtml(r.function_tag || "—")}</td><td class="num">${r.piles ?? "—"}</td><td class="num">${pctv(r.peak_occupancy)}</td><td class="num">${r.gap_score == null ? "—" : Math.round(r.gap_score)}</td>
+            <td><span class="tag ${c}">${cn}${r.kind === "add" ? ` ${r.suggest_add_piles} 根` : ""}</span></td></tr>`
+            + (siteOpen.has(String(r.taz_id)) ? `<tr><td colspan="7"><div class="readonly-note" style="line-height:20px;padding:4px 0">${escHtml(r.reason || "暂无说明")}<br>用车需求 ${r.demand_score == null ? "—" : Math.round(r.demand_score)} 分，周边桩充足程度 ${r.supply_score == null ? "—" : Math.round(r.supply_score)} 分，忙的小时占 ${pctv(r.busy_hours_ratio)}，全天平均占用率 ${pctv(r.avg_occupancy)}</div></td></tr>` : "");
+        }).join("") || `<tr><td colspan="7" class="empty">这一类没有片区</td></tr>`;
+      $("siteBody").querySelectorAll("a[data-sz]").forEach(a => a.onclick = () => { const k = a.dataset.sz; siteOpen.has(k) ? siteOpen.delete(k) : siteOpen.add(k); renderSite(); });
+      pager($("sitePager"), shown.length, sitePage, size, p => { sitePage = p; renderSite(); });
+      const pts = siteRows.filter(r => r.center_lon != null && r.center_lat != null);
+      charts.chartSite.setOption({
+        tooltip: { trigger: "item", formatter: p => { const r = p.data.raw; return `片区 ${escHtml(r.taz_id)}${r.function_tag ? `（${escHtml(r.function_tag)}）` : ""}<br>${SITE_KIND[r.kind][0]}${r.kind === "add" ? ` ${r.suggest_add_piles} 根` : ""}<br>缺桩程度 ${r.gap_score == null ? "—" : Math.round(r.gap_score)}，现有 ${r.piles ?? "—"} 根桩`; } },
+        legend: { data: Object.values(SITE_KIND).map(k => k[0]), top: 0 },
+        grid: { left: 56, right: 24, top: 36, bottom: 40 },
+        xAxis: { type: "value", scale: true, name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { formatter: v => v.toFixed(2) } },
+        yAxis: { type: "value", scale: true, name: "纬度", axisLabel: { formatter: v => v.toFixed(2) } },
+        series: Object.entries(SITE_KIND).map(([k, [cn, , col]]) => ({ name: cn, type: "scatter", itemStyle: { color: col, opacity: .8 },
+          symbolSize: (v, p) => 8 + Math.min(22, (p.data.raw.gap_score || 0) / 5),
+          data: pts.filter(r => r.kind === k).map(r => ({ value: [r.center_lon, r.center_lat], raw: r })) })),
+        graphic: pts.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: empty ? "暂无选址建议" : "这些片区没有位置信息", fill: "#86909C", fontSize: 14 } }],
+      }, true);
+    }
+    charts.chartSite.on("click", p => { if (p.data && p.data.raw) { const r = p.data.raw; siteFilter = "all"; const i = siteRows.indexOf(r); sitePage = Math.floor(i / 10) + 1; siteOpen.add(String(r.taz_id)); renderSite(); } });
+
     /* ---------- 调度运行（运行记录接口还在做，先按常见字段兼容展示；没有接口或没有记录时显示空状态） ---------- */
     const RUNS_API = "/api/runs";
     const RUN_ST = { success: ["成功", "success"], ok: ["成功", "success"], failed: ["失败", "danger"], fail: ["失败", "danger"], error: ["失败", "danger"],
@@ -1132,6 +1194,7 @@
       $("crumbGroup").textContent = g; $("crumbCur").textContent = n; $("pageTitle").textContent = n; $("pageDesc").textContent = d;
       requestAnimationFrame(resizeAll);
       if (r === "runs") loadRuns();
+      if (r === "site") loadSite();
     }
     const go = r => { location.hash = "#/" + r; };
     document.querySelectorAll(".nav li").forEach(li => li.onclick = () => go(li.dataset.route));

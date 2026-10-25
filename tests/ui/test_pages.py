@@ -15,7 +15,7 @@ pw = pytest.importorskip("playwright.sync_api")
 
 UI_BASE = os.environ.get("UI_BASE", "http://127.0.0.1:5096/index.html")
 API_BASE = os.environ.get("API_BASE", "http://127.0.0.1:5000")
-PAGES = ["overview", "zone", "baseline", "map", "alerts", "quality", "tickets"]
+PAGES = ["overview", "zone", "baseline", "map", "site", "alerts", "quality", "tickets"]
 BANNED = re.compile(r"口径|基线|窗口|stub|（无）|undefined|NaN|\[object Object\]")
 
 pytestmark = pytest.mark.skipif(not os.environ.get("UI_TESTS"), reason="设 UI_TESTS=1 才跑页面测试（要先起页面和接口）")
@@ -114,4 +114,28 @@ def test_runs_page_renders_fixture(browser):
     assert "2023-02-28" in t and "成功" in t and "失败" in t and "12.5 分钟" not in t and "源文件缺失" in t
     assert not probs["js"], probs["js"]
     pg.screenshot(path="/tmp/runs_fixture.png")
+    pg.close()
+
+
+def test_site_page_fixture(browser):
+    """选址补桩：用假数据确认汇总、排名表、展开说明和地图点都能出来。"""
+    import json
+    pg, probs = open_page(browser)
+    def row(i, add, reason):
+        return {"taz_id": str(100 + i), "center_lon": 114.0 + i / 100, "center_lat": 22.6, "station_cnt": 3, "piles": 10, "rated_kw": 60,
+                "avg_occupancy": 0.3, "peak_occupancy": 0.8, "busy_hours_ratio": 0.2, "demand_score": 80, "supply_score": 20,
+                "gap_score": 90 - i, "suggest_add_piles": add, "rank": i + 1, "function_tag": "居住", "reason": reason}
+    items = [row(0, 3, "晚上经常排满，建议加 3 根桩。"), row(1, 2, "建议加 2 根桩。"), row(2, 0, "有时比较紧张，先观察。"), row(3, 0, "桩够用，维持现状。")]
+    pg.route("**/api/site/suggest*", lambda r: r.fulfill(status=200, content_type="application/json",
+             body=json.dumps({"ok": True, "data": {"source": "mysql", "run_dt": "2026-10-25", "items": items}})))
+    pg.goto(f"{UI_BASE}#/site")
+    pg.wait_for_timeout(1500)
+    s = pg.inner_text("#siteSum")
+    assert "2 个片区" in s and "一共建议加 5 根桩" in s and "1 个片区" in s
+    pg.click('a[data-sz="100"]')
+    assert "晚上经常排满" in pg.inner_text("#siteBody")
+    n = pg.evaluate("echarts.getInstanceByDom(document.getElementById('chartSite')).getOption().series.map(x => x.data.length)")
+    assert n == [2, 1, 1]
+    assert not probs["js"], probs["js"]
+    assert not BANNED.findall(pg.evaluate("document.body.innerText"))
     pg.close()
