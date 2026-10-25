@@ -136,3 +136,18 @@ export_ads_mysql.py --ds 2022-09-01，真实写回 sz_ev，总耗时 8.5s：
 
 总墙钟 119 s，只刷新 Hive 和数据湖，没有写回 MySQL（MySQL 里的数据已经是对的）。各步：station_info 1,682 行 6.22s；register_ext_dwd 87,679,296 行 3.76s；zone_hour 1,338,568 行 28.79s；quality_station_day 304,442 行 46.59s；zone_occupancy_hour 3.43s；baseline_naive 5.57s；city_overview 181 行 3.99s；zone_daily 59,911 行 4.13s；station_busy_day 181 天 5.11s；quality_summary 3.36s；落湖 ads/zone_hour 2.77s、ads/zone_daily 1.38s。运行期间每 2 秒采一次可用内存，最低 5,610 MB。
 和 MySQL 对账：ads.zone_occupancy_hour 共 1,338,568 行，load_kw_est 有值 742,363 行，power_coverage 有值 1,338,568 行，三项都和 ads_zone_occupancy_hour 一致。抽查片区 595 的 7 个小时（含 2022-09-01 18:00 = 6708.00），数值全部相同。
+
+### 6.3 dwd 修复后全链路重跑（2026-10-25 14:52，local[2] / driver 3g）
+
+起因：小紫修了 dwd 的一个问题（充电桩数为偶数的站，occupancy 算成了 NULL），181 个分区全部重跑。driver 2g 跑到 quality_station_day 时 Spark 内存不够（UNABLE_TO_ACQUIRE_MEMORY），改成 3g 一次跑通，不需要退到 local[1]。
+ads_build 总墙钟 108 s：register_ext_dwd 87,679,296 行 3.27s；zone_hour 1,338,568 行 25.65s；quality_station_day 304,442 行 43.64s；zone_occupancy_hour 3.5s；baseline_naive 5.59s；city_overview 181 行 3.7s；zone_daily 59,911 行 3.83s；station_busy_day 181 天 5.11s；quality_summary 3.37s；落湖 ads/zone_hour 2.85s、ads/zone_daily 1.14s。可用内存最低 7,504 MB。
+写回 MySQL（export_ads_parquet，走 pandas，含 09-02）总墙钟 128 s：zone_occupancy_hour 1,338,568 行 55.44s，baseline_naive 1,338,568 行 66.93s，zone_daily 59,911 行 4.26s，city_overview 181 行 0.88s，dim_station 1,682 行，quality_summary 8 行。site_suggest 331 行（全量替换）0.21s。
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| occupancy 有值行数 | 742,363 | 1,338,568 |
+| load_kw_est 有值行数 | 742,363 | 1,335,346 |
+| 全市平均 occupancy | 0.3014 | 0.2672 |
+| 片区 595，2022-09-01 18:00 的 load_kw_est | 6708.00 | 6323.24 |
+
+质量汇总前后一致：建议维修 161，建议巡检 239，卡死 30 天以上 161。
