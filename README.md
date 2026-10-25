@@ -33,7 +33,7 @@ UrbanEV 原始 5 分钟 CSV（1,682 站 / 181 天）
 | 质检告警 | 661 条 | `docs/orchestration_design.md` |
 | LightGBM vs 上一小时 | MAE 0.0255 vs 0.0285；RMSE 0.0461 vs 0.0578 | `forecast/README.md` |
 | 覆盖索引 | 查询约 220 ms → 约 2 ms | `docs/perf/spark_baseline.md` |
-| 测试 | CI 文件模式 91 个通过、4 个跳过（Python 3.11 / 3.12） | GitHub Actions |
+| 测试 | CI 文件模式 138 个通过、6 个跳过（Python 3.11 / 3.12），页面检查 13 个通过 | GitHub Actions |
 
 ## 3. 运行
 
