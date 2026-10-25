@@ -144,3 +144,12 @@ def test_pile_power_into_station_info(env, monkeypatch):
     r = pile_power.build(src=src / "pile_rated_power.csv", lake=lake)  # rerun is idempotent
     assert r["charge_count_mismatch"] == 2  # 1002 (5 vs 6), 1003 (0 vs 8)
     assert pd.read_parquet(lake / "ods/station_info/part-0.parquet").shape == (4, 11)
+
+
+def test_occupancy_filled_for_even_and_odd_piles(env, monkeypatch):
+    _, lake = env
+    run(monkeypatch, "--ds", day(9))
+    d = part(lake, "dwd", day(9))
+    ok = d[(d.quality_flag != "dropped_src") & d.busy.notna()]
+    assert ok.occupancy.notna().all()  # 1001 has 10 piles, 1002 has 6 (even) -> used to be NaN
+    pd.testing.assert_series_equal(ok.occupancy, ok.busy / ok.total_piles, check_names=False)

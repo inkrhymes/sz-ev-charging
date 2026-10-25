@@ -98,7 +98,7 @@ def _stage_one(args):
     df["is_row_missing"] = miss.astype("int8")
     df["is_stuck"] = stuck_arr.astype("int8")
     df["is_outlier"] = out_mask.astype("int8")
-    ok = (~miss) & df["busy"].notna() & (piles or 0) > 0
+    ok = (~miss) & df["busy"].notna() & ((piles or 0) > 0)  # parens: `&` binds tighter than `>`
     df["occupancy"] = np.where(ok, df["busy"] / (piles if piles else np.nan), np.nan)
     df["quality_flag"] = np.where(miss, "dropped_src", np.where(out_mask, "outlier", "ok"))
     # max consecutive missing run
