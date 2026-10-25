@@ -26,9 +26,10 @@ bash scripts/backup_verify.sh [<目录>]     # 恢复演练：恢复到临时库
 
 ## 实测结果（2026-10-25 14:43，北京时间）
 
-- 备份耗时约 13 秒：库 dump 压缩后 13M，数据湖 112M（1124 个文件）。
-- 恢复到临时库 `sz_ev_restore_test` 用时约 22 秒，19 张表行数全部一致，例如
-  `ads_zone_occupancy_hour` 1,338,568、`ads_baseline_naive` 1,338,568、`dq_alert` 661、`dq_run_log` 6,165、`ads_ticket` 8。
+- 第一次演练（14:43）：备份约 13 秒，库 dump 压缩后 13M，数据湖 112M（1124 个文件），恢复后行数全部一致。
+- 2026-10-25 15:10 再演练一次（告警重建、预测入库之后）：`/workspace/backups/20261025T151051`，备份约 14 秒，库 dump 22M，数据湖 146M（1181 个文件）。
+  恢复到 `sz_ev_restore_test` 约 29 秒，21 张表行数全部一致，例如 `ads_zone_occupancy_hour` 1,338,568、`ads_forecast_zone_hour` 222,432、`dq_alert` 651、`dq_run_log` 9,966、`ops_task_run` 1,263、`ads_ticket` 8。
+- 这次演练发现一个问题：库里的视图（`v_zone_site_base` 等）定义者是 `ev`，恢复到别的库名时 `ev` 没权限，建视图失败，而错误被吞掉了。已修：`restore.sh` 导入时去掉视图的 DEFINER，并且导入出错会直接报错退出。
 - 比对完成后临时库已删除，正式库 `sz_ev` 没有受影响。
 - 这份备份保留为 `/workspace/backups/pre-occupancy-fix_20261025T144314`，是 dwd 占用率修复之前的回滚点。
 

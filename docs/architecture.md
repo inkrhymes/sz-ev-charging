@@ -58,10 +58,18 @@ flowchart LR
 - 每条规则的结果都写入 MySQL 表 `dq_run_log`（ds、层、规则、级别、实测值、阈值、是否通过、运行时间），数据质量页与告警页可以直接读。
 
 ## 6. 预测
-LightGBM 预测片区下一小时占用率，和「直接用上一小时」比较，最后 28 天测试 MAE 0.0255 对 0.0285。细节和接口字段见 8.3。
+两种预测，时间跨度不同，误差不能直接互相比：
+- 下一小时：LightGBM 对比「直接用上一小时」，最后 28 天测试 MAE 0.0255 对 0.0285。
+- 日前（每天预测第二天 24 小时）：2023-02-01 至 02-28 共 28 天，LightGBM MAE 0.0626 / RMSE 0.0945；「沿用最后一个已知值」0.0907 / 0.1493；「照抄昨天同一时刻」MAE 0.0785。每天的数字在 MySQL `ads_forecast_metric_daily`，接口 `/api/forecast/metrics`。
+
+细节和接口字段见 8.3 和 `forecast/README.md`。
 
 ## 7. 服务
 Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + ECharts 的管理后台。
+- 几个参考数字：全市平均占用率 0.267；选址建议 11 个片区共加 15 根桩，排第一的是 TAZ 645（加 5 根）。
+- 可选 Redis 读缓存，打开方式：`MYSQL_DATA_DIR=$PWD/data/mysql REDIS_URL=redis://redis:6379/0 docker compose --profile cache up -d --build redis api`。不设 `REDIS_URL` 就不用缓存。
+- 压测（50 用户、4 个 worker，见 `docs/perf/api_loadtest.md`）：常规负载 P50 12 ms → 3 ms；不限速时约 329 → 1387 QPS，P50 150 → 33 ms，错误率 0，命中率约 88%。
+- 每日 DAG 的最后一步 `cache_flush` 清掉 `szev:*` 缓存（不管上游成败都跑），跑批写进库的新数据不用等缓存过期。
 
 ## 8. 各模块负责人补充
 
@@ -107,7 +115,7 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 | 直接用上一小时 | 0.02849 | 0.05778 |
 | LightGBM | 0.02548 | 0.04614 |
 
-  MAE 低约 11%，RMSE 低约 20%。331 个片区里，MAE 更低的有 174 个，RMSE 更低的有 289 个。好处主要在忙闲突然变化的时候；本来就平稳的片区，上一小时的值已经很准，两者差不多。
+  MAE 低约 11%，RMSE 低约 20%（这是下一小时预测；日前预测的数字见第 6 节）。331 个片区里，MAE 更低的有 174 个，RMSE 更低的有 289 个。好处主要在忙闲突然变化的时候；本来就平稳的片区，上一小时的值已经很准，两者差不多。
 - 输出：`forecast/metrics.json`（整体和每个片区的误差）、`forecast/predictions.csv`（为了文件小，只留 2 月 27–28 日两天的逐小时预测）。
 - 复现：`python -m forecast.train --source data/lake/dwd/charge_5min_clean --test-days 28`，约 4 分钟。
 
