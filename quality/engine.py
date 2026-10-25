@@ -277,7 +277,8 @@ def _connect():
         host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
         user=os.getenv("MYSQL_USER", "root"), password=os.getenv("MYSQL_PASSWORD", "rootpass"),
         database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", autocommit=True,
-        client_flag=pymysql.constants.CLIENT.FOUND_ROWS)
+        client_flag=pymysql.constants.CLIENT.FOUND_ROWS,
+        init_command="SET time_zone = '+08:00'")  # created_at/updated_at 按北京时间
 
 
 def _num(x):
@@ -299,6 +300,27 @@ def _ddl(path):
     return sql[sql.index("CREATE"):].rstrip().rstrip(";")
 
 
+def _fmt_num(x):
+    if x is None:
+        return "?"
+    x = float(x)
+    return str(int(x)) if x == int(x) else f"{x:g}"
+
+
+def _fmt_pct(x):
+    return "?" if x is None else f"{float(x) * 100:.1f}%".replace(".0%", "%")
+
+
+def render_detail(rule, ds, actual, threshold):
+    """按规则 yml 里的 phrase 生成给普通人看的中文说明；没有 phrase 时用通用说法。"""
+    d = pd.Timestamp(ds)
+    ctx = {"date": f"{d.month}月{d.day}日", "actual": _fmt_num(actual), "threshold": _fmt_num(threshold),
+           "actual_pct": _fmt_pct(actual), "threshold_pct": _fmt_pct(threshold)}
+    tpl = (rule or {}).get("phrase") or "{date}有一项数据检查没通过（实测 {actual}，警戒线 {threshold}）"
+    lvl = "需要处理，已暂停后续计算" if (rule or {}).get("severity") == "block" else "提醒"
+    return f"{tpl.format(**ctx)}。【{lvl}】"[:500]
+
+
 def write_alerts(results, layer, ds, rules):
     """未通过的规则写入 dq_alert；同一 ds/层/规则已有告警则只刷新数值，不重置处理状态。"""
     bad = [r for r in results if not r.passed]
@@ -310,9 +332,9 @@ def write_alerts(results, layer, ds, rules):
         with conn.cursor() as cur:
             cur.execute(_ddl(ALERT_DDL))
             for r in bad:
-                lvl = "阻断" if r.severity == "block" else "告警"
-                detail = f"[{lvl}] {ds} {layer} 层规则 {r.rule_name} 未通过：实测 {r.actual}，要求 {r.expected}。{r.message}"[:500]
-                args = (_num(r.actual), _threshold(by_name.get(r.rule_name, {"type": ""})), detail)
+                rule = by_name.get(r.rule_name, {"type": "", "severity": r.severity})
+                act, thr = _num(r.actual), _threshold(rule)
+                args = (act, thr, render_detail(rule, ds, act, thr))
                 n = cur.execute("UPDATE dq_alert SET metric_value=%s, threshold=%s, detail=%s WHERE ds=%s AND layer=%s"
                                 " AND rule_name=%s AND station_id IS NULL", (*args, ds, layer, r.rule_name))
                 if not n:
@@ -379,7 +401,32 @@ def check(layer, ds, df, prev_df=None, write_db=True, run_id=None, rules_dir=RUL
     return results
 
 
+def refresh_details():
+    """把已有规则级告警的 detail 按 phrase 重新生成；只改 detail，不动 status/note/数值。"""
+    import yaml
+    rules = {}
+    for f in RULES_DIR.glob("*.yml"):
+        for r in yaml.safe_load(f.read_text(encoding="utf-8"))["rules"]:
+            rules[r["name"]] = r
+    conn = _connect()
+    n = 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT alert_id, ds, rule_name, severity, metric_value, threshold FROM dq_alert"
+                        " WHERE station_id IS NULL")
+            for aid, ds, name, sev, mv, thr in cur.fetchall():
+                rule = rules.get(name, {"severity": sev})
+                n += cur.execute("UPDATE dq_alert SET detail=%s, updated_at=updated_at WHERE alert_id=%s",
+                                 (render_detail(rule, ds, mv, thr), aid))
+    finally:
+        conn.close()
+    return n
+
+
 def main(argv=None):
+    if argv is None and sys.argv[1:2] == ["--refresh-details"] or argv == ["--refresh-details"]:
+        print(f"[dq] refreshed {refresh_details()} rule-level alert details")
+        return 0
     ap = argparse.ArgumentParser()
     ap.add_argument("--layer", required=True)
     ap.add_argument("--ds", required=True)

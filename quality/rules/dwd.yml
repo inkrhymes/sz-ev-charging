@@ -1,8 +1,8 @@
 rules:
-  - {name: dwd_row_count_min, type: row_count_min, min: 1, severity: block}
-  - {name: dwd_pk_unique, type: duplicate_key, keys: [station_id, ts], severity: block}
-  - {name: dwd_occupancy_range, type: range, column: occupancy, min: 0, max: 1, severity: block}
-  - {name: dwd_total_piles_positive, type: range, column: total_piles, min: 1, severity: block}
+  - {name: dwd_row_count_min, type: row_count_min, min: 1, severity: block, phrase: "{date}清洗后的数据一条都没有"}
+  - {name: dwd_pk_unique, type: duplicate_key, keys: [station_id, ts], severity: block, phrase: "{date}清洗后的数据里有 {actual} 条重复记录"}
+  - {name: dwd_occupancy_range, type: range, column: occupancy, min: 0, max: 1, severity: block, phrase: "{date}有 {actual} 条记录的使用率不在 0~100% 之间，数据有误"}
+  - {name: dwd_total_piles_positive, type: range, column: total_piles, min: 1, severity: block, phrase: "{date}有 {actual} 条记录的充电桩总数为 0 或负数，数据有误"}
   # 阈值基于 181 天逐日单跑（2022-09-01~2023-02-28）：
   # - 整段无数据的 21 站进排除名单（dwd/quality_station run=全量 中 missing_rate>=1）
   # - 前一天有数、当天全空：逐日中位数 0、P95≈46；>50 视为大面积断数，阻断
@@ -13,9 +13,9 @@ rules:
   #     每日新增卡死 = len(stuck[dt] - stuck[dt-1])    -> 180 天 P95=63.25 取 63（中位 1，最大 685）
   #   单日卡死只告警；累计卡死 >=30 天的站每站写一条 dq_alert（全量截至 02-28 共 161 站）
   # - 缺数>30% 的站：逐日 157~745，只告警
-  - {name: dwd_station_went_empty, type: station_went_empty, columns: [busy, idle], group_by: station_id, max_groups: 50, severity: block}
-  - {name: dwd_station_went_empty_any, type: station_went_empty, columns: [busy, idle], group_by: station_id, max_groups: 0, severity: warn}
-  - {name: dwd_stuck_stations, type: flag_groups, column: is_stuck, group_by: station_id, max_groups: 221, severity: warn}
-  - {name: dwd_newly_stuck_stations, type: newly_flagged_groups, column: is_stuck, group_by: station_id, max_groups: 63, severity: warn}
-  - {name: dwd_stuck_cumulative_30d, type: cumulative_flag_days, column: is_stuck, group_by: station_id, min_days: 30, source: dwd/charge_5min_clean, severity: warn}
-  - {name: dwd_high_missing_stations, type: group_null_rate, columns: [busy, idle], group_by: station_id, threshold: 0.30, max_groups: 0, severity: warn}
+  - {name: dwd_station_went_empty, type: station_went_empty, columns: [busy, idle], group_by: station_id, max_groups: 50, severity: block, phrase: "{date}有 {actual} 个站前一天还有数据、这天突然完全没数据（超过警戒线 {threshold}），疑似大面积断数"}
+  - {name: dwd_station_went_empty_any, type: station_went_empty, columns: [busy, idle], group_by: station_id, max_groups: 0, severity: warn, phrase: "{date}有 {actual} 个站前一天还有数据、这天突然完全没数据（超过警戒线 {threshold}）"}
+  - {name: dwd_stuck_stations, type: flag_groups, column: is_stuck, group_by: station_id, max_groups: 221, severity: warn, phrase: "{date}有 {actual} 个站的读数长时间一动不动，疑似卡死（超过警戒线 {threshold}）"}
+  - {name: dwd_newly_stuck_stations, type: newly_flagged_groups, column: is_stuck, group_by: station_id, max_groups: 63, severity: warn, phrase: "{date}新出现 {actual} 个读数一动不动的站（超过警戒线 {threshold}）"}
+  - {name: dwd_stuck_cumulative_30d, type: cumulative_flag_days, column: is_stuck, group_by: station_id, min_days: 30, source: dwd/charge_5min_clean, severity: warn, phrase: "截至{date}，有 {actual} 个站累计 30 天以上读数一动不动，建议派人检修（每个站另有一条单独告警）"}
+  - {name: dwd_high_missing_stations, type: group_null_rate, columns: [busy, idle], group_by: station_id, threshold: 0.30, max_groups: 0, severity: warn, phrase: "{date}有 {actual} 个站超过三成时间没有数据（超过警戒线 {threshold}）"}
