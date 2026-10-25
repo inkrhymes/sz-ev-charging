@@ -173,7 +173,7 @@
   <header class="topbar">
     <div class="brand"><span class="mark"><svg class="ic"><use href="#i-bolt"/></svg></span>深圳市电动汽车充电站运行管理可视化系统</div>
     <div class="top-right">
-      <span class="hide-sm">数据窗口：2022-09-01 至 2022-09-14</span>
+      <span class="hide-sm">数据时间：2022-09-01 至 2022-09-14</span>
       <span id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">当前：连接中</span></span>
       <span class="icon-btn" id="btnTopRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg>刷新</span>
       <div class="user" id="userBox">
@@ -192,7 +192,7 @@
     <ul class="nav">
       <li data-route="overview"><svg class="ic"><use href="#i-dash"/></svg><span>运行总览</span></li>
       <li data-route="zone"><svg class="ic"><use href="#i-map"/></svg><span>片区分析</span></li>
-      <li data-route="baseline"><svg class="ic"><use href="#i-trend"/></svg><span>基线对比</span></li>
+      <li data-route="baseline"><svg class="ic"><use href="#i-trend"/></svg><span>和上小时比</span></li>
     </ul>
     <div class="group">数据治理</div>
     <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li></ul>
@@ -233,7 +233,7 @@
       </div>
     </section>
 
-    <!-- 基线对比 -->
+    <!-- 和上小时比 -->
     <section class="view" id="view-baseline">
       <div class="grid">
         <div class="card col-6 kpi"><div class="kpi-label">平均绝对误差 MAE<span class="tip" data-tip="实际值与参考值差多少，越小说明变化越平稳"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="kpi-val" id="maeVal">-</div><div class="kpi-foot" id="maeFoot"></div></div>
@@ -338,7 +338,7 @@
     const ROUTES = {
       overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
       zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
-      baseline: ["运行监控", "基线对比", "实际占用和上一小时参考值差多少"],
+      baseline: ["运行监控", "和上小时比", "实际占用和上一小时参考值差多少"],
       quality: ["数据治理", "数据质量", "采集数据有没有缺、有没有一直不动"],
       tickets: ["运维管理", "运维工单", "数据异常时自动开单；管理员可以改状态"],
     };
@@ -456,7 +456,7 @@
       pager($("seriesPager"), seriesPts.length, seriesPage, size, n => { seriesPage = n; renderSeriesTable(); });
     }
 
-    /* ---------- 基线对比 ---------- */
+    /* ---------- 和上小时比 ---------- */
     function renderBaseline(data) {
       const pts = data.points || [];
       const x = pts.map(p => tsLabel(p.ts_hour));
