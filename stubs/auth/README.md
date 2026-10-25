@@ -1,1 +1,1 @@
-# stub: auth（开题薄皮）
+# stub: auth（轻量扩展）

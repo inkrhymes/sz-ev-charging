@@ -186,7 +186,7 @@ def main() -> None:
     lines.append(f"- 原始/清洗行数：**{n_raw}**")
     lines.append(f"- 脚本：`etl/generate_demo_subset.py` → `load_ods.py` → `clean_to_dwd.py`")
     lines.append("")
-    lines.append("## 1. 汇总指标（对齐开题 / 字典 §4）")
+    lines.append("## 1. 汇总指标（对齐字典 §4）")
     lines.append("")
     lines.append("| 指标 | 实测值 | 演示子集目标 |")
     lines.append("|------|--------|--------------|")

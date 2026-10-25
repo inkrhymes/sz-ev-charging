@@ -1,1 +1,1 @@
-# stub: baseline（开题薄皮）
+# stub: baseline（轻量扩展）

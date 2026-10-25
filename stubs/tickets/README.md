@@ -1,1 +1,1 @@
-# stub: tickets（开题薄皮）
+# stub: tickets（轻量扩展）
