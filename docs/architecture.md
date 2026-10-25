@@ -85,7 +85,8 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 - 单文件 `web/index.html`，浅色管理后台布局，按地址栏 `#/页面名` 切页，图表用 ECharts；共七页：运行总览、片区分析、和上小时比、片区地图、数据质量、异常告警、运维工单。
 - 每页只通过一个取数函数拿数据（如 `fetchMapData()`、`fetchAlerts()`/`saveAlert()`），以后接口换成查 MySQL ads 表、加预测字段，只改这些函数；接口连不上时回落到页面内置的离线样例。
 - 片区地图：`GET /api/map/zones` 返回每个片区的中心经纬度（片区内站点坐标取平均）、站数、桩数、平均占用率，以及每个站的坐标和状态。目前没有片区边界数据，先用经纬度散点图，颜色表示忙闲，圆的大小表示桩数；点片区下钻到站点表。
-- 异常告警：`GET /api/alerts` 由站点检查结果生成（读数不动、缺数比例超过 30%、断档 2 天以上），`PATCH /api/alerts/<id>` 改状态（open / processing / closed），只有管理员能改。状态暂存在服务进程内存里，重启会恢复；MySQL 模式下计划落到 ads 告警表。
+- 异常告警：`GET /api/alerts` 由站点检查结果生成（读数不动、缺数比例超过 30%、断档 2 天以上），`PATCH /api/alerts/<id>` 改状态（open / ack / closed，页面显示为待处理 / 处理中 / 已关闭），只有管理员能改（按登录拿到的 token 判断，前端放在 `Authorization: Bearer` 请求头里）。设置 `ALERT_DB=mysql` 后读写 MySQL 表 `dq_alert`（小白建表），连不上或未设置时用进程内存兜底。
+- 和上小时比：`/api/baseline` 的点里带 `y_hat_lgbm` / `abs_err_lgbm`、顶层带 `mae_lgbm` 等指标时，额外画预测线和四张误差卡片；没有这些字段就不显示。
 - 访客只能看，管理员（登录时选择）可以处理告警和工单。
 
 ### 8.5 调度与质检（小白）

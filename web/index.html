@@ -243,6 +243,12 @@
         <div class="card col-6 kpi"><div class="kpi-label">样本点数</div><div class="kpi-val" id="nVal">-</div><div class="kpi-foot">小时粒度</div></div>
         <div class="card col-6 kpi"><div class="kpi-label">对比片区</div><div class="kpi-val" id="bzVal">-</div><div class="kpi-foot">在「片区分析」中切换</div></div>
       </div>
+      <div class="grid" id="fcCards" style="display:none">
+        <div class="card col-6 kpi"><div class="kpi-label">预测值平均误差<span class="tip" data-tip="模型预测和实际占用率平均差多少，只算测试时段"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="kpi-val" id="fcMae">-</div><div class="kpi-foot" id="fcMaeFoot"></div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">上一小时参考值平均误差</div><div class="kpi-val" id="fcMaeLag">-</div><div class="kpi-foot">同一测试时段</div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">预测值均方根误差</div><div class="kpi-val" id="fcRmse">-</div><div class="kpi-foot" id="fcRmseFoot"></div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">测试时段</div><div class="kpi-val" id="fcSplit" style="font-size:18px">-</div><div class="kpi-foot">从这里往后是模型没见过的数据</div></div>
+      </div>
       <div class="grid">
         <div class="card col-24"><div class="card-head"><div class="card-title">实际占用 vs 上一小时参考<span class="tip" data-tip="拿上一小时的实际占用，当作这一小时的参考值，方便看出突然变高或变低"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
           <div class="card-body"><div id="chartBaseline" class="chart-main"></div></div></div>
@@ -486,15 +492,19 @@
     function renderBaseline(data) {
       const pts = data.points || [];
       const x = pts.map(p => tsLabel(p.ts_hour));
+      const fc = normForecast(data);
+      const fcSeries = fc.has ? [{ name: "预测值", type: "line", data: pts.map(p => p.y_hat_lgbm ?? null), connectNulls: false, lineStyle: { width: 2 }, itemStyle: { color: "#722ED1" },
+        markLine: fc.split ? { symbol: "none", silent: true, lineStyle: { color: "#86909C", type: "dotted" }, label: { formatter: "测试时段开始", color: "#86909C" }, data: [{ xAxis: tsLabel(fc.split) }] } : undefined }] : [];
+      renderForecastCards(fc);
       charts.chartBaseline.setOption({
-        legend: { data: ["实际占用率", "上一小时参考值"] },
+        legend: { data: ["实际占用率", "上一小时参考值"].concat(fc.has ? ["预测值"] : []) },
         tooltip: { valueFormatter: v => (v * 100).toFixed(1) + "%" },
         xAxis: { type: "category", data: x, boundaryGap: false },
         yAxis: occAxis(),
         series: [
           { name: "实际占用率", type: "line", data: pts.map(p => p.y_true) },
           { name: "上一小时参考值", type: "line", data: pts.map(p => p.y_hat_lag1), lineStyle: { type: "dashed", width: 2 } },
-        ],
+        ].concat(fcSeries),
       }, true);
       charts.chartErr.setOption({
         tooltip: { axisPointer: { type: "shadow" }, valueFormatter: v => (v * 100).toFixed(1) + "%" },
@@ -511,6 +521,24 @@
       $("maxErrFoot").textContent = pts[mi] ? `出现在 ${tsLabel(pts[mi].ts_hour)}` : "-";
       $("nVal").innerHTML = `${pts.length}<small>点</small>`;
       $("bzVal").textContent = data.taz_id || "-";
+    }
+
+    // 预测字段的唯一入口：/api/baseline 带 y_hat_lgbm、mae_lgbm 等字段时才显示，没有就整块隐藏
+    function normForecast(d) {
+      const pts = d.points || [];
+      const m = d.metrics || d;
+      const has = pts.some(p => p.y_hat_lgbm != null);
+      const num = v => v == null || v === "" || isNaN(+v) ? null : +v;
+      return { has, mae: num(m.mae_lgbm), maeLag: num(m.mae_lag1), rmse: num(m.rmse_lgbm), rmseLag: num(m.rmse_lag1), split: m.split_ts || (pts.find(p => p.y_hat_lgbm != null) || {}).ts_hour || null };
+    }
+    function renderForecastCards(fc) {
+      $("fcCards").style.display = fc.has ? "" : "none";
+      if (!fc.has) return;
+      const f = v => v == null ? "-" : `${(v * 100).toFixed(2)}<small>%</small>`;
+      $("fcMae").innerHTML = f(fc.mae); $("fcMaeLag").innerHTML = f(fc.maeLag); $("fcRmse").innerHTML = f(fc.rmse);
+      $("fcMaeFoot").textContent = "以占用率百分点计";
+      $("fcRmseFoot").textContent = fc.rmseLag == null ? "大误差权重更高" : `上一小时参考值：${(fc.rmseLag * 100).toFixed(2)}%`;
+      $("fcSplit").textContent = fc.split ? tsLabel(fc.split) : "-";
     }
 
     /* ---------- 数据质量 ---------- */
@@ -641,7 +669,7 @@
       try {
         if (!usingOffline) {
           const res = await fetch(`${API_BASE}/api/tickets/${id}`, {
-            method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentUser.token}` }, body: JSON.stringify({ status: next }),
+            method: "PATCH", headers: authHeaders(), body: JSON.stringify({ status: next }),
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error);
@@ -657,12 +685,32 @@
     /* ---------- 片区地图 ---------- */
     // 数据入口只有这一个函数：以后换成 MySQL ads 表或加预测字段，只改这里
     async function fetchMapData() {
-      try { return { ...(await apiGet(`/api/map/zones`)), offline: false }; }
+      try { return { ...normMapData(await apiGet(`/api/map/zones`)), offline: false }; }
       catch (e) {
         const zones = [["1106",114.06,22.55,0.42,3],["519",113.93,22.53,0.31,2],["1011",114.12,22.60,0.18,2],["102",114.10,22.54,0.55,1],["595",113.79,22.72,null,1]]
           .map(([taz_id, lon, lat, avg_occupancy, station_count]) => ({ taz_id, lon, lat, avg_occupancy, station_count, total_piles: station_count * 20 }));
         return { zones, stations: [], offline: true };
       }
+    }
+    // 兼容以后 ads_zone_daily 的字段名；只给站点时按片区汇总（全量约 1682 站也只画片区点）
+    const pick = (o, ...ks) => { for (const k of ks) if (o[k] != null && o[k] !== "") return o[k]; return null; };
+    const numOrNull = v => v == null ? null : +v;
+    function normMapData(d) {
+      const stations = (d.stations || []).map(s => ({ ...s, taz_id: String(pick(s, "taz_id", "zone_id", "TAZID")),
+        lon: numOrNull(pick(s, "lon", "longitude")), lat: numOrNull(pick(s, "lat", "latitude")),
+        avg_occupancy: numOrNull(pick(s, "avg_occupancy", "occupancy_avg", "avg_occ")), total_piles: numOrNull(pick(s, "total_piles", "charge_count", "piles")) }));
+      let zones = (d.zones || []).map(z => ({ taz_id: String(pick(z, "taz_id", "zone_id")),
+        lon: numOrNull(pick(z, "lon", "center_lon", "longitude")), lat: numOrNull(pick(z, "lat", "center_lat", "latitude")),
+        avg_occupancy: numOrNull(pick(z, "avg_occupancy", "occupancy_avg", "avg_occ")),
+        station_count: +(pick(z, "station_count", "station_cnt") || 0), total_piles: +(pick(z, "total_piles", "pile_cnt") || 0) }));
+      if (!zones.length && stations.length) {
+        const g = {};
+        stations.forEach(s => { const a = g[s.taz_id] ||= { taz_id: s.taz_id, lon: 0, lat: 0, n: 0, occ: [], total_piles: 0 };
+          if (s.lon != null) { a.lon += s.lon; a.lat += s.lat; a.n++; } a.total_piles += s.total_piles || 0; if (s.avg_occupancy != null) a.occ.push(s.avg_occupancy); a.station_count = (a.station_count || 0) + 1; });
+        zones = Object.values(g).filter(a => a.n).map(a => ({ taz_id: a.taz_id, lon: a.lon / a.n, lat: a.lat / a.n, station_count: a.station_count, total_piles: a.total_piles,
+          avg_occupancy: a.occ.length ? a.occ.reduce((x, y) => x + y, 0) / a.occ.length : null }));
+      }
+      return { zones: zones.filter(z => z.lon != null && z.lat != null), stations };
     }
     let mapData = { zones: [], stations: [] }, mapZone = "";
     const occColor = v => v == null ? "#C9CDD4" : v > 0.5 ? "#F53F3F" : v > 0.3 ? "#FF7D00" : v > 0.15 ? "#165DFF" : "#94BFFF";
@@ -676,7 +724,8 @@
         xAxis: { type: "value", scale: true, name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { formatter: v => v.toFixed(2) } },
         yAxis: { type: "value", scale: true, name: "纬度", axisLabel: { formatter: v => v.toFixed(2) } },
         series: [{ type: "scatter", data: z.map(d => ({ value: [d.lon, d.lat], raw: d, itemStyle: { color: occColor(d.avg_occupancy), opacity: .85 } })),
-          symbolSize: (v, p) => 12 + Math.min(28, Math.sqrt(p.data.raw.total_piles || 1) * 2), label: { show: true, position: "top", formatter: p => p.data.raw.taz_id, color: "#4E5969", fontSize: 11 } }],
+          symbolSize: (v, p) => 12 + Math.min(28, Math.sqrt(p.data.raw.total_piles || 1) * 2), label: { show: z.length <= 60, position: "top", formatter: p => p.data.raw.taz_id, color: "#4E5969", fontSize: 11 } },
+          { id: "st", type: "scatter", data: [], symbol: "diamond", symbolSize: 9, itemStyle: { color: "#1D2129" }, tooltip: { formatter: p => `站点 ${p.data.raw.station_id}<br>平均占用率 ${p.data.raw.avg_occupancy == null ? "暂无数据" : pct(p.data.raw.avg_occupancy)}` } }],
       }, true);
       const ranked = z.filter(d => d.avg_occupancy != null).sort((a, b) => b.avg_occupancy - a.avg_occupancy).slice(0, 8);
       $("mapRank").innerHTML = ranked.map(d => `<tr><td><a data-z="${d.taz_id}">片区 ${d.taz_id}</a></td><td class="num">${d.station_count}</td><td class="num">${pct(d.avg_occupancy)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">暂无数据</td></tr>`;
@@ -685,37 +734,39 @@
     }
     function pickZone(z) {
       mapZone = z || "";
-      const list = mapData.stations.filter(s => !mapZone || String(s.taz_id) === mapZone);
-      $("mapZoneTitle").textContent = mapZone ? `片区 ${mapZone} 里的站` : "全部片区的站";
+      const list = mapData.stations.filter(s => !mapZone || String(s.taz_id) === mapZone).slice(0, mapZone ? 500 : 50);
+      // 站点小点只在点进某个片区后才画，站多时地图不会糊成一片
+      charts.chartMap.setOption({ series: [{}, { id: "st", data: mapZone ? list.filter(s => s.lon != null).map(s => ({ value: [s.lon, s.lat], raw: s })) : [] }] });
+      $("mapZoneTitle").textContent = mapZone ? `片区 ${mapZone} 里的站` : (mapData.stations.length > 50 ? `全部片区的站（先列前 50 个，点片区看全部）` : "全部片区的站");
       $("mapStations").innerHTML = list.map(s => `<tr><td>站点 ${s.station_id}</td><td>片区 ${s.taz_id}</td><td class="num">${s.total_piles ?? "—"}</td>
         <td class="num">${s.avg_occupancy == null ? "—" : pct(s.avg_occupancy)}</td><td class="num">${pct(s.missing_rate)}</td>
         <td><span class="tag ${s.status === "normal" ? "success" : s.status === "stuck" ? "danger" : "warning"}">${s.status_label}</span></td></tr>`).join("")
         || `<tr><td colspan="6" class="empty">${mapData.offline ? "接口连不上，暂时看不到站点" : "这个片区没有站"}</td></tr>`;
     }
-    charts.chartMap.on("click", p => p.data && pickZone(String(p.data.raw.taz_id)));
+    charts.chartMap.on("click", p => p.seriesIndex === 0 && p.data && pickZone(String(p.data.raw.taz_id)));
     $("mapZoneAll").onclick = () => pickZone("");
 
     /* ---------- 异常告警 ---------- */
     const ALERT_KIND = { stuck: "读数不动", high_missing: "缺数偏多", long_gap: "长时间没数据" };
     const ALERT_LEVEL = { high: ["紧急", "danger"], medium: ["一般", "warning"], low: ["提醒", "gray"] };
-    const ALERT_STATUS = { open: ["待处理", "danger"], processing: ["处理中", "blue"], closed: ["已关闭", "success"] };
+    const ALERT_STATUS = { open: ["待处理", "danger"], ack: ["处理中", "blue"], closed: ["已关闭", "success"] };
     let alertList = [], alertFilter = "all", alertsOffline = false;
     // 数据入口：读、改都只走这两个函数
     async function fetchAlerts() {
       try { alertsOffline = false; return await apiGet(`/api/alerts`); }
       catch (e) { alertsOffline = true; return [
         { alert_id: 1, station_id: "1334", taz_id: "1068", kind: "stuck", level: "high", detail: "读数长时间不变", status: "open", created_at: "2022-09-14 23:55" },
-        { alert_id: 2, station_id: "1010", taz_id: "595", kind: "high_missing", level: "medium", detail: "缺数比例 100.0%", status: "processing", created_at: "2022-09-14 23:55" }]; }
+        { alert_id: 2, station_id: "1010", taz_id: "595", kind: "high_missing", level: "medium", detail: "缺数比例 100.0%", status: "ack", created_at: "2022-09-14 23:55" }]; }
     }
     async function saveAlert(id, status) {
       if (alertsOffline) return; // TODO 离线样例只在页面里改，刷新后恢复
-      const res = await fetch(`${API_BASE}/api/alerts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentUser.token}` }, body: JSON.stringify({ status }) });
+      const res = await fetch(`${API_BASE}/api/alerts/${id}`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify({ status }) });
       const json = await res.json(); if (!json.ok) throw new Error(json.error);
     }
-    async function loadAlerts() { alertList = await fetchAlerts(); renderAlerts(); }
+    async function loadAlerts() { alertList = (await fetchAlerts()).map(a => ({ ...a, status: a.status === "processing" ? "ack" : a.status })); renderAlerts(); }
     function renderAlerts() {
       const cnt = s => alertList.filter(a => s === "all" || a.status === s).length;
-      $("alertTabs").innerHTML = [["all", "全部"], ["open", "待处理"], ["processing", "处理中"], ["closed", "已关闭"]]
+      $("alertTabs").innerHTML = [["all", "全部"], ["open", "待处理"], ["ack", "处理中"], ["closed", "已关闭"]]
         .map(([k, n]) => `<div data-k="${k}" class="${k === alertFilter ? "active" : ""}">${n}<em>${cnt(k)}</em></div>`).join("");
       $("alertTabs").querySelectorAll("div").forEach(d => d.onclick = () => { alertFilter = d.dataset.k; renderAlerts(); });
       const isAdmin = currentUser.role === "admin";
@@ -723,8 +774,8 @@
       $("alertBody").innerHTML = shown.map(a => {
         const [sn, sc] = ALERT_STATUS[a.status] || ["未知", "gray"], [ln, lc] = ALERT_LEVEL[a.level] || ["提醒", "gray"];
         const op = !isAdmin ? '<span class="readonly-note">登录管理员后可处理</span>'
-          : a.status === "open" ? `<a data-id="${a.alert_id}" data-to="processing">开始处理</a> <a data-id="${a.alert_id}" data-to="closed" style="margin-left:8px">直接关闭</a>`
-          : a.status === "processing" ? `<a data-id="${a.alert_id}" data-to="closed">处理完了</a>`
+          : a.status === "open" ? `<a data-id="${a.alert_id}" data-to="ack">开始处理</a> <a data-id="${a.alert_id}" data-to="closed" style="margin-left:8px">直接关闭</a>`
+          : a.status === "ack" ? `<a data-id="${a.alert_id}" data-to="closed">处理完了</a>`
           : `<a data-id="${a.alert_id}" data-to="open">重新打开</a>`;
         return `<tr><td class="num" style="text-align:left">AL-${String(a.alert_id).padStart(4, "0")}</td><td>站点 ${a.station_id}</td><td>片区 ${a.taz_id}</td>
           <td>${ALERT_KIND[a.kind] || "其他"}</td><td>${a.detail}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.created_at}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
@@ -732,7 +783,7 @@
       $("alertBody").querySelectorAll("a[data-id]").forEach(el => el.onclick = async () => {
         const a = alertList.find(x => x.alert_id === +el.dataset.id); const to = el.dataset.to;
         try { await saveAlert(a.alert_id, to); a.status = to; renderAlerts(); toast(`告警 AL-${String(a.alert_id).padStart(4, "0")} 已改为「${ALERT_STATUS[to][0]}」`); }
-        catch (e) { toast(`没改成：${e.message === "no permission" ? "没有权限" : e.message}`); }
+        catch (e) { toast(`没改成：${e.message}`); }
       });
     }
 
@@ -805,6 +856,8 @@
     $("btnFold").onclick = () => { localStorage.setItem("SIDER_FOLD", document.body.classList.contains("folded") ? "0" : "1"); autoFold(); setTimeout(resizeAll, 170); };
 
     /* ---------- 用户菜单 / 登录 ---------- */
+    // 改状态的接口按登录时拿到的 token 判断权限
+    const authHeaders = () => Object.assign({ "Content-Type": "application/json" }, currentUser.token ? { Authorization: `Bearer ${currentUser.token}` } : {});
     function setUser(d) {
       currentUser = { user: d.user, role: d.role, token: d.token || `demo-${d.role}` };
       const roleCn = d.role === "admin" ? "管理员" : "访客";

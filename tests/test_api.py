@@ -112,3 +112,22 @@ def test_cors_preflight(client):
 def test_dashboard_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "深圳市电动汽车充电站运行管理可视化系统" in r.get_data(as_text=True)
+
+
+def test_alerts_states_and_permission(client):
+    r = client.get("/api/alerts")
+    alerts = r.get_json()["data"]
+    assert alerts and {a["status"] for a in alerts} <= {"open", "ack", "closed"}
+    aid = alerts[0]["alert_id"]
+    assert client.patch(f"/api/alerts/{aid}", json={"status": "ack"}, headers=RO).status_code == 403
+    assert client.patch(f"/api/alerts/{aid}", json={"status": "processing2"}, headers=ADMIN).status_code == 400
+    r = client.patch(f"/api/alerts/{aid}", json={"status": "ack"}, headers=ADMIN)
+    assert r.get_json()["data"]["status"] == "ack"
+    r = client.patch(f"/api/alerts/{aid}", json={"status": "closed"}, headers=ADMIN)
+    assert r.get_json()["data"]["status"] == "closed"
+
+
+def test_map_zones(client):
+    d = client.get("/api/map/zones").get_json()["data"]
+    assert d["zones"] and all({"taz_id", "lon", "lat", "station_count"} <= set(z) for z in d["zones"])
+    assert all("lon" in s and "taz_id" in s for s in d["stations"])

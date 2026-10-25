@@ -470,11 +470,44 @@ def map_zones():
 
 
 ALERT_LEVEL = {"stuck": "high", "high_missing": "medium", "long_gap": "low"}
+ALERT_STATES = {"open", "ack", "closed"}
 _ALERTS: list[dict] | None = None
+
+# MySQL 表 dq_alert（小白在 quality/sql/ 下建表）。设置 ALERT_DB=mysql 才启用，否则用内存。
+# 读取时兼容的列名：alert_id|id, station_id, taz_id|zone_id, kind|rule_name, level|severity,
+# detail|message, status, created_at, note
+_ALERT_COLS = {"alert_id": ("alert_id", "id"), "taz_id": ("taz_id", "zone_id"), "kind": ("kind", "rule_name", "rule_type"),
+               "level": ("level", "severity"), "detail": ("detail", "message")}
+
+
+def _alert_db():
+    if os.getenv("ALERT_DB", "").lower() != "mysql":
+        return None
+    try:
+        import pymysql
+        return pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
+                               user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
+                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4",
+                               cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
+    except Exception:
+        return None  # 连不上就退回内存
+
+
+def _norm_alert(r: dict) -> dict:
+    out = dict(r)
+    for k, names in _ALERT_COLS.items():
+        out[k] = next((r[n] for n in names if r.get(n) is not None), r.get(k))
+    st = out.get("status") or "open"
+    out["status"] = "ack" if st == "processing" else st
+    out["created_at"] = str(out.get("created_at") or "")[:16]
+    out.setdefault("note", "")
+    if out.get("level") in {"block", "warn"}:
+        out["level"] = "high" if out["level"] == "block" else "medium"
+    return {k: out.get(k) for k in ("alert_id", "station_id", "taz_id", "kind", "level", "detail", "status", "created_at", "note")}
 
 
 def alerts_store():
-    """由数据检查结果生成告警；状态保存在进程内存。TODO: MySQL 模式落表 ads_alert。"""
+    """由数据检查结果生成告警；状态保存在进程内存（无 MySQL 时的兜底）。"""
     global _ALERTS
     if _ALERTS is None:
         _ALERTS = []
@@ -494,9 +527,45 @@ def alerts_store():
     return _ALERTS
 
 
+def alerts_read() -> tuple[list[dict], str]:
+    con = _alert_db()
+    if con:
+        try:
+            with con, con.cursor() as cur:
+                cur.execute("SELECT * FROM dq_alert ORDER BY created_at DESC LIMIT 1000")
+                return [_norm_alert(r) for r in cur.fetchall()], "mysql"
+        except Exception:
+            pass
+    return alerts_store(), "memory"
+
+
+def alerts_write(alert_id: int, status: str, note: str | None):
+    con = _alert_db()
+    if con:
+        try:
+            with con, con.cursor() as cur:
+                n = cur.execute("UPDATE dq_alert SET status=%s WHERE alert_id=%s", (status, alert_id))
+                con.commit()
+                if n:
+                    cur.execute("SELECT * FROM dq_alert WHERE alert_id=%s", (alert_id,))
+                    return _norm_alert(cur.fetchone())
+                return None
+        except Exception:
+            pass
+    for a in alerts_store():
+        if a["alert_id"] == alert_id:
+            a["status"] = status
+            if note is not None:
+                a["note"] = str(note)[:200]
+            return a
+    return None
+
+
 @app.get("/api/alerts")
 def alerts_list():
-    return ok(alerts_store())
+    rows, _src = alerts_read()
+    st = request.args.get("status")
+    return ok([a for a in rows if not st or a["status"] == st])
 
 
 @app.patch("/api/alerts/<int:alert_id>")
@@ -506,11 +575,9 @@ def alerts_patch(alert_id):
         return denied
     body = request.get_json(silent=True) or {}
     status = body.get("status")
-    if status not in {"open", "processing", "closed"}:
-        return err("status must be open|processing|closed")
-    for a in alerts_store():
-        if a["alert_id"] == alert_id:
-            a["status"] = status
-            a["note"] = str(body.get("note") or a["note"])[:200]
-            return ok(a)
-    return err("alert not found", 404)
+    if status == "processing":
+        status = "ack"  # 兼容旧前端
+    if status not in ALERT_STATES:
+        return err("status must be open|ack|closed")
+    a = alerts_write(alert_id, status, body.get("note"))
+    return ok(a) if a else err("alert not found", 404)
