@@ -3,83 +3,275 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>深圳充电站运行管理可视化（演示）</title>
+  <title>深圳市电动汽车充电站运行管理可视化系统</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   <style>
-    :root { --bg:#0b1220; --card:#121a2b; --line:#243044; --text:#e8eefc; --muted:#8b9bb8; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); }
-    header { display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:1px solid var(--line); }
-    header h1 { margin:0; font-size:18px; font-weight:600; }
-    .meta { color:var(--muted); font-size:12px; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#1e293b; color:var(--muted); font-size:11px; margin-left:8px; }
-    .badge.live { color:#86efac; background:#14532d; }
-    .badge.mock { color:#fde68a; background:#78350f; }
-    main { padding:16px 20px 28px; display:grid; gap:14px; max-width:100vw; overflow-x:hidden; }
-    main > section { min-width:0; }
-    .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:10px; }
-    .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
-    .kpi .label { color:var(--muted); font-size:12px; }
-    .kpi .value { font-size:22px; font-weight:700; margin-top:4px; }
-    .row { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); gap:14px; }
-    .row3 { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,0.9fr); gap:14px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; min-height:280px; min-width:0; overflow:auto; }
-    .card h2 { margin:0 0 8px; font-size:14px; font-weight:600; color:var(--muted); }
-    .chart { width:100%; height:240px; }
-    table { width:100%; border-collapse:collapse; font-size:12px; }
-    th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
-    th { color:var(--muted); font-weight:500; }
-    button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:11px; }
-    button:disabled { opacity:.4; cursor:not-allowed; }
-    select, input { background:#0f172a; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 8px; font-size:12px; }
-    .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
-    @media (max-width:1100px) {
-      .row, .row3 { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+    :root {
+      --primary-6:#165DFF; --primary-1:#E8F3FF; --primary-5:#4080FF; --primary-7:#0E42D2;
+      --success-6:#00B42A; --success-1:#E8FFEA; --warning-6:#FF7D00; --warning-1:#FFF7E8;
+      --danger-6:#F53F3F; --danger-1:#FFECE8;
+      --text-1:#1D2129; --text-2:#4E5969; --text-3:#86909C; --text-4:#C9CDD4;
+      --border:#E5E6EB; --fill-1:#F7F8FA; --fill-2:#F2F3F5; --bg-white:#FFFFFF;
+      --side-w:220px;
     }
+    * { box-sizing:border-box; }
+    html, body { margin:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+           font-size:14px; line-height:22px; color:var(--text-1); background:var(--fill-2); }
+    a { color:var(--primary-6); text-decoration:none; cursor:pointer; transition:color .15s; }
+    a:hover { color:var(--primary-5); }
+    svg.ic { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+    .num, .kpi-val { font-variant-numeric:tabular-nums; }
+
+    /* top bar */
+    .topbar { position:fixed; top:0; left:0; right:0; height:60px; background:var(--bg-white); border-bottom:1px solid var(--border);
+              display:flex; align-items:center; justify-content:space-between; padding:0 20px; z-index:30; }
+    .brand { display:flex; align-items:center; gap:10px; font-size:16px; font-weight:500; min-width:0; white-space:nowrap; }
+    .brand .mark { width:28px; height:28px; border-radius:4px; background:var(--primary-6); color:var(--bg-white); display:flex; align-items:center; justify-content:center; }
+    .brand .mark svg { width:18px; height:18px; }
+    .top-right { display:flex; align-items:center; gap:20px; color:var(--text-3); font-size:12px; white-space:nowrap; }
+    .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--text-4); margin-right:6px; vertical-align:middle; }
+    .dot.on { background:var(--success-6); }
+    .icon-btn { display:inline-flex; align-items:center; gap:4px; color:var(--text-2); cursor:pointer; }
+    .icon-btn:hover { color:var(--primary-6); }
+    .user { position:relative; display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text-1); font-size:14px; }
+    .avatar { width:32px; height:32px; border-radius:50%; background:var(--primary-1); color:var(--primary-6); display:flex; align-items:center; justify-content:center; font-size:14px; }
+    .menu-pop { display:none; position:absolute; right:0; top:44px; width:200px; background:var(--bg-white); border:1px solid var(--border); border-radius:4px;
+                box-shadow:0 4px 10px rgba(0,0,0,.1); padding:4px 0; cursor:default; }
+    .menu-pop.open { display:block; }
+    .menu-pop .info { padding:8px 12px; border-bottom:1px solid var(--border); }
+    .menu-pop .info div:last-child { color:var(--text-3); font-size:12px; }
+    .menu-pop .item { padding:6px 12px; color:var(--text-2); cursor:pointer; }
+    .menu-pop .item:hover { background:var(--fill-1); }
+
+    /* sider */
+    .sider { position:fixed; top:60px; left:0; bottom:0; width:var(--side-w); background:var(--bg-white); border-right:1px solid var(--border);
+             overflow:hidden auto; z-index:20; transition:width .15s; display:flex; flex-direction:column; }
+    .group { padding:12px 20px 4px; font-size:12px; color:var(--text-3); white-space:nowrap; }
+    .nav { list-style:none; margin:0; padding:0 8px; }
+    .nav li { position:relative; height:40px; display:flex; align-items:center; gap:12px; padding:0 12px; margin:4px 0; border-radius:2px;
+              color:var(--text-2); cursor:pointer; white-space:nowrap; transition:background .15s, color .15s; }
+    .nav li:hover { background:var(--fill-1); }
+    .nav li.active { background:var(--primary-1); color:var(--primary-6); }
+    .nav li.active::before { content:""; position:absolute; left:-8px; top:8px; bottom:8px; width:3px; background:var(--primary-6); }
+    .collapse { margin-top:auto; height:40px; border-top:1px solid var(--border); display:flex; align-items:center; padding:0 20px; color:var(--text-3); cursor:pointer; }
+    body.folded { --side-w:48px; }
+    body.folded .group, body.folded .nav li span, body.folded .collapse span { display:none; }
+    body.folded .nav { padding:0; } body.folded .nav li { justify-content:center; padding:0; margin:4px 0; }
+    body.folded .nav li.active::before { left:0; }
+    body.folded .collapse { justify-content:center; padding:0; } body.folded .collapse svg { transform:rotate(180deg); }
+
+    /* main */
+    .main { margin-left:var(--side-w); padding:76px 20px 20px; min-width:0; transition:margin-left .15s; }
+    .main-inner { max-width:1600px; margin:0 auto; }
+    .crumb { color:var(--text-3); margin-bottom:8px; } .crumb b { color:var(--text-1); font-weight:400; }
+    .page-head { margin-bottom:16px; }
+    .page-head h1 { margin:0; font-size:20px; line-height:28px; font-weight:500; }
+    .page-head p { margin:4px 0 0; font-size:12px; line-height:20px; color:var(--text-3); }
+    .view { display:none; } .view.active { display:block; }
+
+    .grid { display:grid; grid-template-columns:repeat(24,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
+    .col-24{grid-column:span 24}.col-16{grid-column:span 16}.col-12{grid-column:span 12}.col-8{grid-column:span 8}.col-6{grid-column:span 6}.col-4{grid-column:span 4}
+    .card { background:var(--bg-white); border:1px solid var(--border); border-radius:4px; min-width:0; }
+    .card-head { display:flex; align-items:center; justify-content:space-between; padding:16px 20px 0; }
+    .card-title { font-size:16px; line-height:24px; font-weight:500; display:flex; align-items:center; gap:6px; }
+    .card-extra { font-size:12px; color:var(--text-3); }
+    .card-body { padding:16px 20px 20px; }
+    .tip { position:relative; display:inline-flex; color:var(--text-3); cursor:help; }
+    .tip svg { width:14px; height:14px; }
+    .tip:hover::after { content:attr(data-tip); position:absolute; left:50%; bottom:22px; transform:translateX(-50%); width:max-content; max-width:240px;
+                        background:var(--text-1); color:var(--bg-white); font-size:12px; line-height:20px; font-weight:400; padding:6px 10px; border-radius:4px; z-index:40; white-space:normal; }
+    .chart-main { width:100%; height:320px; } .chart-sub { width:100%; height:260px; }
+
+    /* kpi */
+    .kpi { height:112px; padding:20px; }
+    .kpi-label { font-size:12px; line-height:20px; color:var(--text-3); display:flex; align-items:center; gap:4px; }
+    .kpi-val { font-size:28px; line-height:36px; font-weight:600; margin-top:4px; white-space:nowrap; }
+    .kpi-val small { font-size:14px; font-weight:400; color:var(--text-2); margin-left:4px; }
+    .kpi-val.danger { color:var(--danger-6); } .kpi-val.warning { color:var(--warning-6); }
+    .kpi-foot { font-size:12px; line-height:20px; color:var(--text-3); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* filter + controls */
+    .filter { display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; padding:16px 20px; margin-bottom:16px; }
+    .filter .f { display:flex; align-items:center; gap:8px; color:var(--text-2); }
+    .filter .ops { margin-left:auto; display:flex; gap:8px; }
+    input, select { height:32px; border:1px solid var(--border); border-radius:2px; padding:0 10px; font:inherit; color:var(--text-1); background:var(--bg-white); }
+    input:focus, select:focus { outline:none; border-color:var(--primary-6); }
+    .btn { height:32px; padding:0 15px; border-radius:2px; border:1px solid var(--border); background:var(--bg-white); color:var(--text-2); font:inherit; cursor:pointer; transition:all .15s; }
+    .btn:hover { color:var(--primary-6); border-color:var(--primary-5); }
+    .btn.primary { background:var(--primary-6); border-color:var(--primary-6); color:var(--bg-white); }
+    .btn.primary:hover { background:var(--primary-5); border-color:var(--primary-5); }
+    .btn.primary:active { background:var(--primary-7); }
+    .btn.block { width:100%; }
+
+    /* table */
+    table { width:100%; border-collapse:collapse; }
+    th { background:var(--fill-1); color:var(--text-2); font-weight:500; text-align:left; height:40px; padding:0 16px; border-bottom:1px solid var(--border); white-space:nowrap; }
+    td { height:48px; padding:0 16px; border-bottom:1px solid var(--border); color:var(--text-2); }
+    tbody tr:hover td { background:var(--fill-1); }
+    th.num, td.num { text-align:right; }
+    .empty { text-align:center; color:var(--text-3); height:96px; }
+    .tag { display:inline-flex; align-items:center; height:24px; padding:0 8px; border-radius:2px; font-size:12px; white-space:nowrap; }
+    .tag.danger { background:var(--danger-1); color:var(--danger-6); }
+    .tag.warning { background:var(--warning-1); color:var(--warning-6); }
+    .tag.success { background:var(--success-1); color:var(--success-6); }
+    .tag.gray { background:var(--fill-2); color:var(--text-2); }
+    .tag.blue { background:var(--primary-1); color:var(--primary-6); }
+    .pager { display:flex; justify-content:flex-end; align-items:center; gap:8px; padding-top:16px; font-size:12px; color:var(--text-3); }
+    .pager .pg { min-width:32px; height:32px; line-height:30px; text-align:center; border:1px solid var(--border); border-radius:2px; color:var(--text-2); background:var(--bg-white); cursor:pointer; font-size:14px; }
+    .pager .pg.cur { border-color:var(--primary-6); color:var(--primary-6); }
+    .pager .pg.dis { color:var(--text-4); cursor:not-allowed; }
+    .tabs { display:flex; gap:32px; border-bottom:1px solid var(--border); margin:0 20px; }
+    .tabs div { height:46px; line-height:46px; cursor:pointer; color:var(--text-2); position:relative; }
+    .tabs div.active { color:var(--primary-6); font-weight:500; }
+    .tabs div.active::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--primary-6); }
+    .tabs em { font-style:normal; color:var(--text-3); margin-left:4px; }
+    .stat-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .stat-list div { padding:12px 16px; background:var(--fill-1); border-radius:2px; }
+    .stat-list b { display:block; font-size:20px; line-height:28px; font-weight:600; }
+    .stat-list span { font-size:12px; color:var(--text-3); }
+    .readonly-note { font-size:12px; color:var(--text-3); }
+
+    /* modal + toast */
+    .mask { display:none; position:fixed; inset:0; background:rgba(29,33,41,.6); z-index:50; align-items:center; justify-content:center; }
+    .mask.open { display:flex; }
+    .modal { width:400px; background:var(--bg-white); border-radius:4px; box-shadow:0 4px 10px rgba(0,0,0,.1); }
+    .modal-head { padding:16px 20px; border-bottom:1px solid var(--border); font-size:16px; font-weight:500; display:flex; justify-content:space-between; }
+    .modal-body { padding:20px; } .modal-body label { display:block; color:var(--text-2); margin-bottom:6px; }
+    .modal-body .field { margin-bottom:16px; } .modal-body .field input, .modal-body .field select { width:100%; }
+    .login-msg { font-size:12px; color:var(--text-3); min-height:20px; margin-top:8px; }
+    .login-msg.err { color:var(--danger-6); }
+    .toast { position:fixed; top:76px; left:50%; transform:translateX(-50%); background:var(--bg-white); border:1px solid var(--border); box-shadow:0 4px 10px rgba(0,0,0,.1);
+             border-radius:4px; padding:8px 16px; display:none; z-index:60; }
+
+    @media (max-width:1439px) { .kpis6 > .col-4 { grid-column:span 6; } }
+    @media (max-width:1100px) { .grid > .col-12, .grid > .col-16, .grid > .col-8 { grid-column:span 24; } .kpis6 > .col-4 { grid-column:span 8; } }
+    @media (max-width:640px) { .grid > [class*="col-"] { grid-column:span 24 !important; } .top-right .hide-sm { display:none; } }
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>深圳市电动汽车充电站运行管理可视化 <span id="modeBadge" class="badge mock">MOCK</span></h1>
-      <div class="meta">运行管理六模块 · overview / zone / quality / baseline / tickets</div>
-    </div>
-    <div class="toolbar">
-      <label class="meta">片区
-        <select id="zoneSelect">
-          <option value="">加载中…</option>
-        </select>
-      </label>
-      <button id="btnRefresh">刷新</button>
-      <span id="apiHint" class="meta"></span>
+  <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></symbol>
+    <symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4 2.5-2.5z"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-fold" viewBox="0 0 24 24"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <div class="brand"><span class="mark"><svg class="ic"><use href="#i-bolt"/></svg></span>深圳市电动汽车充电站运行管理可视化系统</div>
+    <div class="top-right">
+      <span class="hide-sm">数据窗口：2022-09-01 至 2022-09-14</span>
+      <span id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">数据源：连接中</span></span>
+      <span class="icon-btn" id="btnTopRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg>刷新</span>
+      <div class="user" id="userBox">
+        <span class="avatar" id="avatar">访</span><span id="userName">只读访客</span><svg class="ic" style="color:var(--text-3)"><use href="#i-down"/></svg>
+        <div class="menu-pop" id="userPop">
+          <div class="info"><div id="popName">访客</div><div id="popRole">只读访客</div></div>
+          <div class="item" id="menuLogin">切换账号 / 登录</div>
+          <div class="item" id="menuLogout">退出登录</div>
+        </div>
+      </div>
     </div>
   </header>
-  <main>
-    <section class="kpis" id="kpis"></section>
-    <section class="row">
-      <div class="card"><h2>片区占用率时序</h2><div id="chartSeries" class="chart"></div></div>
-      <div class="card"><h2>质检数字</h2><div id="chartQuality" class="chart"></div></div>
-    </section>
-    <section class="row3">
-      <div class="card"><h2>上一时刻 naive 基线对比</h2><div id="chartBaseline" class="chart"></div></div>
-      <div class="card">
-        <h2>运维工单 stub</h2>
-        <table>
-          <thead><tr><th>ID</th><th>站点</th><th>类型</th><th>状态</th><th></th></tr></thead>
-          <tbody id="ticketBody"></tbody>
-        </table>
+
+  <aside class="sider">
+    <div class="group">运行监控</div>
+    <ul class="nav">
+      <li data-route="overview"><svg class="ic"><use href="#i-dash"/></svg><span>运行总览</span></li>
+      <li data-route="zone"><svg class="ic"><use href="#i-map"/></svg><span>片区分析</span></li>
+      <li data-route="baseline"><svg class="ic"><use href="#i-trend"/></svg><span>基线对比</span></li>
+    </ul>
+    <div class="group">数据治理</div>
+    <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li></ul>
+    <div class="group">运维管理</div>
+    <ul class="nav"><li data-route="tickets"><svg class="ic"><use href="#i-tool"/></svg><span>运维工单</span></li></ul>
+    <div class="collapse" id="btnFold"><svg class="ic"><use href="#i-fold"/></svg><span style="margin-left:8px">收起菜单</span></div>
+  </aside>
+
+  <main class="main"><div class="main-inner">
+    <div class="crumb"><span id="crumbGroup">运行监控</span> / <b id="crumbCur">运行总览</b></div>
+    <div class="page-head"><h1 id="pageTitle">运行总览</h1><p id="pageDesc"></p></div>
+
+    <!-- 运行总览 -->
+    <section class="view" id="view-overview">
+      <div class="grid kpis6" id="kpis"></div>
+      <div class="grid">
+        <div class="card col-16"><div class="card-head"><div class="card-title">片区占用率趋势<span class="tip" data-tip="所选片区内各站小时级平均占用率（占用桩数/总桩数）"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="ovSeriesExtra"></div></div>
+          <div class="card-body"><div id="chartOverview" class="chart-main"></div></div></div>
+        <div class="card col-8"><div class="card-head"><div class="card-title">工单概况<span class="tip" data-tip="由数据质量异常自动生成的巡检与维修工单"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="tickets">查看全部</a></div>
+          <div class="card-body"><div class="stat-list" id="ticketStat"></div><div id="chartTicket" class="chart-sub" style="height:236px"></div></div></div>
       </div>
+    </section>
+
+    <!-- 片区分析 -->
+    <section class="view" id="view-zone">
+      <div class="card filter">
+        <div class="f">片区<select id="zoneSelect" style="width:160px"><option value="">加载中…</option></select></div>
+        <div class="f">日期<input type="date" id="dateFrom" value="2022-09-01" min="2022-09-01" max="2022-09-14" />至<input type="date" id="dateTo" value="2022-09-07" min="2022-09-01" max="2022-09-14" /></div>
+        <div class="ops"><button class="btn" id="btnReset">重置</button><button class="btn primary" id="btnRefresh">查询</button></div>
+      </div>
+      <div class="grid">
+        <div class="card col-24"><div class="card-head"><div class="card-title">占用率与估算负荷<span class="tip" data-tip="估算负荷 = 占用桩数 × 单桩额定功率，仅作趋势参考"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="seriesExtra"></div></div>
+          <div class="card-body"><div id="chartSeries" class="chart-main"></div></div></div>
+        <div class="card col-24"><div class="card-head"><div class="card-title">小时明细</div><div class="card-extra" id="seriesCount"></div></div>
+          <div class="card-body"><table><thead><tr><th>时间</th><th>片区</th><th class="num">占用率</th><th class="num">估算负荷（kW）</th></tr></thead><tbody id="seriesBody"></tbody></table><div class="pager" id="seriesPager"></div></div></div>
+      </div>
+    </section>
+
+    <!-- 基线对比 -->
+    <section class="view" id="view-baseline">
+      <div class="grid">
+        <div class="card col-6 kpi"><div class="kpi-label">平均绝对误差 MAE<span class="tip" data-tip="|实际值 − 上一时刻基线| 的平均值，越小越好"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="kpi-val" id="maeVal">-</div><div class="kpi-foot" id="maeFoot"></div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">最大绝对误差</div><div class="kpi-val" id="maxErrVal">-</div><div class="kpi-foot" id="maxErrFoot"></div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">样本点数</div><div class="kpi-val" id="nVal">-</div><div class="kpi-foot">小时粒度</div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">对比片区</div><div class="kpi-val" id="bzVal">-</div><div class="kpi-foot">在「片区分析」中切换</div></div>
+      </div>
+      <div class="grid">
+        <div class="card col-24"><div class="card-head"><div class="card-title">实际占用率与上一时刻基线<span class="tip" data-tip="基线：用上一小时的实际值作为本小时的预测，是最简单的参照模型"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
+          <div class="card-body"><div id="chartBaseline" class="chart-main"></div></div></div>
+        <div class="card col-24"><div class="card-head"><div class="card-title">逐小时绝对误差</div></div>
+          <div class="card-body"><div id="chartErr" class="chart-sub"></div></div></div>
+      </div>
+    </section>
+
+    <!-- 数据质量 -->
+    <section class="view" id="view-quality">
+      <div class="grid" id="qualityKpis"></div>
+      <div class="card"><div class="card-head"><div class="card-title">质检指标明细<span class="tip" data-tip="来自数据质检报告，窗口内全部样本站统计"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
+        <div class="card-body"><table><thead><tr><th>指标</th><th class="num">数值</th><th>统计口径</th><th>判定</th></tr></thead><tbody id="qualityBody"></tbody></table></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">异常站点</div></div>
+        <div class="card-body"><table><thead><tr><th>站点</th><th>片区</th><th>问题类型</th><th class="num">缺失率</th></tr></thead><tbody id="stationBody"></tbody></table></div></div>
+    </section>
+
+    <!-- 运维工单 -->
+    <section class="view" id="view-tickets">
       <div class="card">
-        <h2>只读登录 stub</h2>
-        <div class="toolbar">
-          <input id="userInput" value="demo" style="width:90px" />
-          <select id="roleSelect"><option value="readonly">readonly</option><option value="admin">admin</option></select>
-          <button id="btnLogin">登录</button>
+        <div class="tabs" id="ticketTabs"></div>
+        <div class="card-body">
+          <table><thead><tr><th>工单编号</th><th>站点</th><th>类型</th><th>状态</th><th>操作</th></tr></thead><tbody id="ticketBody"></tbody></table>
+          <div class="pager" id="ticketPager"></div>
         </div>
-        <pre id="loginOut" class="meta" style="white-space:pre-wrap"></pre>
       </div>
     </section>
-  </main>
+  </div></main>
+
+  <div class="mask" id="loginMask"><div class="modal">
+    <div class="modal-head">登录<span class="icon-btn" id="btnCloseLogin">关闭</span></div>
+    <div class="modal-body">
+      <div class="field"><label>账号</label><input id="userInput" value="demo" /></div>
+      <div class="field"><label>角色</label><select id="roleSelect"><option value="readonly">只读访客</option><option value="admin">运维管理员</option></select></div>
+      <button class="btn primary block" id="btnLogin">登录</button>
+      <div class="login-msg" id="loginOut"></div>
+    </div>
+  </div></div>
+  <div class="toast" id="toast"></div>
+
   <script>
     const API_BASE = localStorage.getItem("API_BASE") || "http://127.0.0.1:5000";
     const FALLBACK = {
@@ -118,10 +310,53 @@
       ],
     };
 
-    let usingMock = true;
-    const chartSeries = echarts.init(document.getElementById("chartSeries"));
-    const chartQuality = echarts.init(document.getElementById("chartQuality"));
-    const chartBaseline = echarts.init(document.getElementById("chartBaseline"));
+    /* ---------- 文案映射：界面上不出现原始字段名 / 英文状态 ---------- */
+    const METRIC = {
+      row_missing_rate: { name: "数据缺失率", unit: "%", rate: true, note: "缺失记录数 / 应有记录数（5 分钟粒度）" },
+      stuck_station_cnt: { name: "卡死站", unit: "座", note: "连续多个时段读数不变的站点" },
+      high_missing_station_cnt: { name: "高缺失站", unit: "座", note: "单站缺失率超过 30%" },
+      demo_station_cnt: { name: "样本站", unit: "座", note: "纳入本系统统计的站点" },
+    };
+    const TYPE_CN = { repair: "维修", inspect: "巡检" };
+    const STATUS = { open: ["待处理", "danger"], processing: ["处理中", "warning"], done: ["已完成", "success"] };
+    const NEXT_LABEL = { open: "开始处理", processing: "标记完成" };
+    const ROUTES = {
+      overview: ["运行监控", "运行总览", "全市充电站当日运行指标与工单概况"],
+      zone: ["运行监控", "片区分析", "按片区查看小时级占用率与估算负荷，可筛选日期范围"],
+      baseline: ["运行监控", "基线对比", "实际占用率与上一时刻基线预测的误差分析"],
+      quality: ["数据治理", "数据质量", "原始采集数据的缺失、卡死等质检结果"],
+      tickets: ["运维管理", "运维工单", "由质检异常生成的巡检与维修工单，管理员可流转状态"],
+    };
+
+    /* ---------- ECharts 主题（规范 2.7） ---------- */
+    echarts.registerTheme("arcoLight", {
+      color: ["#165DFF", "#14C9C9", "#F7BA1E", "#722ED1", "#F53F3F", "#00B42A"],
+      backgroundColor: "transparent",
+      textStyle: { fontFamily: "inherit", color: "#4E5969", fontSize: 12 },
+      title: { show: false },
+      grid: { left: 48, right: 16, top: 40, bottom: 32, containLabel: false },
+      legend: { top: 0, right: 0, icon: "roundRect", itemWidth: 12, itemHeight: 4, textStyle: { color: "#4E5969" } },
+      categoryAxis: { axisLine: { lineStyle: { color: "#E5E6EB" } }, axisTick: { show: false }, axisLabel: { color: "#86909C" }, splitLine: { show: false } },
+      valueAxis: { axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: "#86909C" }, splitLine: { lineStyle: { color: "#E5E6EB", type: "dashed" } } },
+      line: { symbol: "none", smooth: false, lineStyle: { width: 2 } },
+      bar: { barMaxWidth: 24, itemStyle: { borderRadius: [2, 2, 0, 0] } },
+      tooltip: { trigger: "axis", backgroundColor: "#FFFFFF", borderColor: "#E5E6EB", borderWidth: 1, padding: [8, 12], textStyle: { color: "#1D2129", fontSize: 12 },
+                 extraCssText: "box-shadow:0 4px 10px rgba(0,0,0,.1);border-radius:4px;", axisPointer: { type: "line", lineStyle: { color: "#C9CDD4", type: "dashed" } } },
+    });
+    const $ = id => document.getElementById(id);
+    const charts = {};
+    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
+    const resizeAll = () => Object.values(charts).forEach(c => c.resize());
+    const pct = v => (v * 100).toFixed(0) + "%";
+    const tsLabel = ts => ts.slice(5, 16);   // MM-DD HH:mm
+    const tip = t => `<span class="tip" data-tip="${t}"><svg class="ic"><use href="#i-info"/></svg></span>`;
+
+    let usingOffline = true;
+    let ticketList = [], ticketFilter = "all";
+    let seriesPts = [], seriesTaz = "", seriesPage = 1;
+    let currentUser = { user: "访客", role: "readonly" };
+
+    function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = "none", 2000); }
 
     async function apiGet(path) {
       const ctrl = new AbortController();
@@ -133,90 +368,160 @@
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || "api error");
         return json.data;
-      } catch (e) {
-        clearTimeout(t);
-        throw e;
-      }
+      } catch (e) { clearTimeout(t); throw e; }
     }
 
-    function renderKpis(o) {
+    /* ---------- 运行总览 ---------- */
+    function renderKpis(o, validZones) {
+      const zoneVal = validZones != null ? `${o.zone_cnt}<small>个（${validZones} 个有效）</small>` : `${o.zone_cnt}<small>个</small>`;
       const items = [
-        ["演示站数", o.station_cnt],
-        ["片区数", o.zone_cnt],
-        ["日均占用率", ((o.avg_occupancy || 0) * 100).toFixed(1) + "%"],
-        ["高峰小时", o.peak_hour + ":00"],
-        ["卡死站", o.stuck_cnt],
-        ["高缺失站", o.high_missing_cnt],
+        ["接入站点", `${o.station_cnt}<small>座</small>`, "", `统计日 ${o.dt || "-"}`, "纳入本系统的充电站数量"],
+        ["覆盖片区", zoneVal, "", "有效：存在完整时序数据", "按交通小区（TAZ）划分；部分片区站点数据全缺"],
+        ["平均占用率", `${((o.avg_occupancy || 0) * 100).toFixed(1)}<small>%</small>`, "", `峰值时段 ${String(o.peak_hour).padStart(2, "0")}:00`, "统计日全部站点小时占用率的平均值"],
+        ["峰值时段", `${String(o.peak_hour).padStart(2, "0")}:00`, "", "当日平均占用率最高的小时", "按小时聚合后取占用率最大的时段"],
+        ["卡死站", `${o.stuck_cnt}<small>座</small>`, "danger", "需排查采集终端", "连续多个时段读数不变的站点"],
+        ["高缺失站", `${o.high_missing_cnt}<small>座</small>`, "warning", "缺失率超过 30%", "单站数据缺失率超过 30% 的站点"],
       ];
-      document.getElementById("kpis").innerHTML = items.map(([l,v]) =>
-        `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`
-      ).join("");
+      $("kpis").innerHTML = items.map(([l, v, cls, f, t]) =>
+        `<div class="card col-4 kpi"><div class="kpi-label">${l}${tip(t)}</div><div class="kpi-val ${cls}">${v}</div><div class="kpi-foot">${f}</div></div>`).join("");
     }
+
+    function occAxis(extra) { return Object.assign({ type: "value", min: 0, max: 1, axisLabel: { formatter: pct } }, extra); }
 
     function renderSeries(data) {
       const pts = data.points || [];
-      chartSeries.setOption({
-        backgroundColor: "transparent",
-        tooltip: { trigger: "axis" },
-        legend: { data: ["占用率", "估算负荷kW"], textStyle: { color: "#8b9bb8" } },
-        grid: { left: 48, right: 48, top: 36, bottom: 28 },
-        xAxis: { type: "category", data: pts.map(p => p.ts_hour.slice(5, 16)), axisLabel: { color: "#8b9bb8" } },
-        yAxis: [
-          { type: "value", name: "占用率", min: 0, max: 1, axisLabel: { color: "#8b9bb8" }, splitLine: { lineStyle: { color: "#243044" } } },
-          { type: "value", name: "kW", axisLabel: { color: "#8b9bb8" }, splitLine: { show: false } },
-        ],
+      seriesPts = pts; seriesTaz = data.taz_id || ""; seriesPage = 1;
+      const x = pts.map(p => tsLabel(p.ts_hour));
+      $("ovSeriesExtra").textContent = `片区 ${seriesTaz || "-"}`;
+      $("seriesExtra").textContent = `片区 ${seriesTaz || "-"} · ${pts.length} 个小时点`;
+      charts.chartOverview.setOption({
+        tooltip: { valueFormatter: v => (v * 100).toFixed(1) + "%" },
+        xAxis: { type: "category", data: x, boundaryGap: false },
+        yAxis: occAxis(),
+        series: [{ name: "占用率", type: "line", data: pts.map(p => p.occupancy), areaStyle: { color: "rgba(22,93,255,0.08)" } }],
+      }, true);
+      charts.chartSeries.setOption({
+        legend: { data: ["占用率", "估算负荷（kW）"] },
+        grid: { left: 48, right: 56, top: 40, bottom: 32 },
+        xAxis: { type: "category", data: x, boundaryGap: false },
+        yAxis: [occAxis({ name: "占用率", nameTextStyle: { color: "#86909C" } }),
+                { type: "value", name: "kW", nameTextStyle: { color: "#86909C" }, splitLine: { show: false } }],
         series: [
-          { name: "占用率", type: "line", smooth: true, data: pts.map(p => p.occupancy), showSymbol: false, itemStyle: { color: "#3b82f6" } },
-          { name: "估算负荷kW", type: "line", yAxisIndex: 1, smooth: true, data: pts.map(p => p.load_kw_est), showSymbol: false, itemStyle: { color: "#22c55e" } },
+          { name: "占用率", type: "line", data: pts.map(p => p.occupancy) },
+          { name: "估算负荷（kW）", type: "line", yAxisIndex: 1, data: pts.map(p => p.load_kw_est) },
         ],
-      });
+      }, true);
+      renderSeriesTable();
     }
 
-    function renderQuality(rows) {
-      chartQuality.setOption({
-        backgroundColor: "transparent",
-        tooltip: { trigger: "axis" },
-        grid: { left: 120, right: 24, top: 16, bottom: 24 },
-        xAxis: { type: "value", axisLabel: { color: "#8b9bb8" }, splitLine: { lineStyle: { color: "#243044" } } },
-        yAxis: { type: "category", data: rows.map(r => r.metric), axisLabel: { color: "#8b9bb8" } },
-        series: [{
-          type: "bar",
-          data: rows.map(r => typeof r.value === "number" && r.value <= 1 && String(r.metric).includes("rate") ? +(r.value * 100).toFixed(1) : r.value),
-          itemStyle: { color: "#f59e0b" },
-          label: { show: true, position: "right", color: "#e8eefc" },
-        }],
-      });
+    function pager(el, total, page, size, onGo) {
+      const pages = Math.max(1, Math.ceil(total / size));
+      let html = `<span>共 ${total} 条</span><span class="pg ${page <= 1 ? "dis" : ""}" data-p="${page - 1}">&lt;</span>`;
+      for (let i = 1; i <= pages; i++) {
+        if (pages > 7 && i > 2 && i < pages - 1 && Math.abs(i - page) > 1) { if (!html.endsWith("…</span>")) html += `<span>…</span>`; continue; }
+        html += `<span class="pg ${i === page ? "cur" : ""}" data-p="${i}">${i}</span>`;
+      }
+      html += `<span class="pg ${page >= pages ? "dis" : ""}" data-p="${page + 1}">&gt;</span><span>${size} 条/页</span>`;
+      el.innerHTML = html;
+      el.querySelectorAll(".pg").forEach(p => p.onclick = () => { const n = +p.dataset.p; if (n >= 1 && n <= pages && n !== page) onGo(n); });
     }
 
+    function renderSeriesTable() {
+      const size = 10, rows = seriesPts.slice((seriesPage - 1) * size, seriesPage * size);
+      $("seriesCount").textContent = `${seriesPts.length} 条`;
+      $("seriesBody").innerHTML = rows.length ? rows.map(p => `<tr><td class="num" style="text-align:left">${p.ts_hour.slice(0, 16)}</td><td>${seriesTaz}</td>
+        <td class="num">${(p.occupancy * 100).toFixed(1)}%</td><td class="num">${(+p.load_kw_est).toFixed(1)}</td></tr>`).join("")
+        : `<tr><td colspan="4" class="empty">所选条件下暂无数据</td></tr>`;
+      pager($("seriesPager"), seriesPts.length, seriesPage, size, n => { seriesPage = n; renderSeriesTable(); });
+    }
+
+    /* ---------- 基线对比 ---------- */
     function renderBaseline(data) {
       const pts = data.points || [];
-      chartBaseline.setOption({
-        backgroundColor: "transparent",
-        tooltip: { trigger: "axis" },
-        legend: { data: ["真实占用", "lag1 预测"], textStyle: { color: "#8b9bb8" } },
-        grid: { left: 40, right: 16, top: 36, bottom: 28 },
-        xAxis: { type: "category", data: pts.map(p => p.ts_hour.slice(11, 16)), axisLabel: { color: "#8b9bb8" } },
-        yAxis: { type: "value", min: 0, max: 1, axisLabel: { color: "#8b9bb8" }, splitLine: { lineStyle: { color: "#243044" } } },
+      const x = pts.map(p => tsLabel(p.ts_hour));
+      charts.chartBaseline.setOption({
+        legend: { data: ["实际占用率", "上一时刻基线"] },
+        tooltip: { valueFormatter: v => (v * 100).toFixed(1) + "%" },
+        xAxis: { type: "category", data: x, boundaryGap: false },
+        yAxis: occAxis(),
         series: [
-          { name: "真实占用", type: "line", data: pts.map(p => p.y_true), showSymbol: false, itemStyle: { color: "#e8eefc" } },
-          { name: "lag1 预测", type: "line", data: pts.map(p => p.y_hat_lag1), showSymbol: false, lineStyle: { type: "dashed" }, itemStyle: { color: "#a78bfa" } },
+          { name: "实际占用率", type: "line", data: pts.map(p => p.y_true) },
+          { name: "上一时刻基线", type: "line", data: pts.map(p => p.y_hat_lag1), lineStyle: { type: "dashed", width: 2 } },
         ],
-      });
+      }, true);
+      charts.chartErr.setOption({
+        tooltip: { axisPointer: { type: "shadow" }, valueFormatter: v => (v * 100).toFixed(1) + "%" },
+        xAxis: { type: "category", data: x },
+        yAxis: { type: "value", axisLabel: { formatter: pct } },
+        series: [{ name: "绝对误差", type: "bar", data: pts.map(p => p.abs_err), itemStyle: { color: "#F7BA1E" } }],
+      }, true);
+      const errs = pts.map(p => p.abs_err || 0);
+      const mae = errs.length ? errs.reduce((a, b) => a + b, 0) / errs.length : 0;
+      const mx = errs.length ? Math.max(...errs) : 0, mi = errs.indexOf(mx);
+      $("maeVal").innerHTML = `${(mae * 100).toFixed(2)}<small>%</small>`;
+      $("maeFoot").textContent = "以占用率百分点计";
+      $("maxErrVal").innerHTML = `${(mx * 100).toFixed(1)}<small>%</small>`;
+      $("maxErrFoot").textContent = pts[mi] ? `出现在 ${tsLabel(pts[mi].ts_hour)}` : "-";
+      $("nVal").innerHTML = `${pts.length}<small>点</small>`;
+      $("bzVal").textContent = data.taz_id || "-";
     }
 
+    /* ---------- 数据质量 ---------- */
+    function renderQuality(rows) {
+      const fmt = r => { const m = METRIC[r.metric] || {}; return m.rate ? (r.value * 100).toFixed(2) : r.value; };
+      const level = r => /stuck/.test(r.metric) ? "danger" : /high_missing|missing_rate/.test(r.metric) ? "warning" : "";
+      $("qualityKpis").innerHTML = rows.map(r => {
+        const m = METRIC[r.metric] || { name: "其他指标", unit: "", note: "" };
+        return `<div class="card col-6 kpi"><div class="kpi-label">${m.name}${tip(m.note)}</div>
+          <div class="kpi-val ${level(r)}">${fmt(r)}<small>${m.unit}</small></div><div class="kpi-foot">${m.note}</div></div>`;
+      }).join("");
+      $("qualityBody").innerHTML = rows.map(r => {
+        const m = METRIC[r.metric] || { name: "其他指标", unit: "", note: "" };
+        const judge = /demo_station/.test(r.metric) ? '<span class="tag gray">参考</span>'
+          : (m.rate ? r.value > 0.2 : r.value > 0) ? '<span class="tag warning">需关注</span>' : '<span class="tag success">正常</span>';
+        const note = String(r.note || "").replace(/missing_rate\s*>\s*0?\.30/i, "缺失率 > 30%").replace(/[A-Za-z_]{4,}/g, "").trim() || m.note;
+        return `<tr><td>${m.name}</td><td class="num">${fmt(r)}${m.unit === "%" ? "%" : " " + m.unit}</td><td>${note}</td><td>${judge}</td></tr>`;
+      }).join("");
+      // 站点级明细：若接口将来返回 stations 字段则直接展示，否则显示空状态
+      const st = rows.stations || [];
+      $("stationBody").innerHTML = st.length ? st.map(s => `<tr><td>${s.station_id}</td><td>${s.taz_id || "-"}</td>
+        <td>${s.stuck ? '<span class="tag danger">数据卡死</span>' : '<span class="tag warning">高缺失</span>'}</td><td class="num">${((s.missing_rate || 0) * 100).toFixed(1)}%</td></tr>`).join("")
+        : `<tr><td colspan="4" class="empty">站点级质检明细暂未接入，可在「运维工单」查看已生成工单的站点</td></tr>`;
+    }
+
+    /* ---------- 运维工单 ---------- */
     function renderTickets(list) {
-      const body = document.getElementById("ticketBody");
-      body.innerHTML = (list || []).map(t => `
-        <tr>
-          <td>${t.ticket_id}</td>
-          <td>${t.station_id}</td>
-          <td>${t.type}</td>
-          <td>${t.status}</td>
-          <td><button data-id="${t.ticket_id}" ${t.status === "done" ? "disabled" : ""}>下一状态</button></td>
-        </tr>`).join("");
-      body.querySelectorAll("button[data-id]").forEach(btn => {
-        btn.onclick = () => advanceTicket(+btn.dataset.id, list);
-      });
+      ticketList = list || [];
+      const cnt = s => ticketList.filter(t => s === "all" || t.status === s).length;
+      const tabs = [["all", "全部"], ["open", "待处理"], ["processing", "处理中"], ["done", "已完成"]];
+      $("ticketTabs").innerHTML = tabs.map(([k, n]) => `<div data-k="${k}" class="${k === ticketFilter ? "active" : ""}">${n}<em>${cnt(k)}</em></div>`).join("");
+      $("ticketTabs").querySelectorAll("div").forEach(d => d.onclick = () => { ticketFilter = d.dataset.k; renderTickets(ticketList); });
+      const isAdmin = currentUser.role === "admin";
+      const shown = ticketList.filter(t => ticketFilter === "all" || t.status === ticketFilter);
+      const body = $("ticketBody");
+      body.innerHTML = shown.length ? shown.map(t => {
+        const [cn, color] = STATUS[t.status] || ["未知", "gray"];
+        const op = !isAdmin ? '<span class="readonly-note">无操作权限</span>'
+          : t.status === "done" ? '<span class="readonly-note">—</span>'
+          : `<a data-id="${t.ticket_id}">${NEXT_LABEL[t.status]}</a>`;
+        return `<tr><td class="num" style="text-align:left">WO-${String(t.ticket_id).padStart(4, "0")}</td><td>站点 ${t.station_id}</td>
+          <td><span class="tag gray">${TYPE_CN[t.type] || "其他"}</span></td><td><span class="tag ${color}">${cn}</span></td><td>${op}</td></tr>`;
+      }).join("") : `<tr><td colspan="5" class="empty">暂无工单</td></tr>`;
+      body.querySelectorAll("a[data-id]").forEach(a => a.onclick = () => advanceTicket(+a.dataset.id, ticketList));
+      pager($("ticketPager"), shown.length, 1, 10, () => {});
+      // 总览页工单概况
+      $("ticketStat").innerHTML = [["open", "待处理"], ["processing", "处理中"], ["done", "已完成"]]
+        .map(([k, n]) => `<div><b class="num" style="color:var(--${STATUS[k][1]}-6)">${cnt(k)}</b><span>${n}</span></div>`).join("");
+      const types = Object.keys(TYPE_CN);
+      charts.chartTicket.setOption({
+        tooltip: { axisPointer: { type: "shadow" } },
+        legend: { data: types.map(k => TYPE_CN[k]) },
+        grid: { left: 32, right: 8, top: 40, bottom: 24 },
+        xAxis: { type: "category", data: ["待处理", "处理中", "已完成"] },
+        yAxis: { type: "value", minInterval: 1 },
+        series: types.map((k, i) => ({ name: TYPE_CN[k], type: "bar", stack: "t", data: ["open", "processing", "done"].map(s => ticketList.filter(t => t.type === k && t.status === s).length),
+                                        itemStyle: { color: i ? "#14C9C9" : "#165DFF", borderRadius: 0 } })),
+      }, true);
     }
 
     async function advanceTicket(id, list) {
@@ -224,49 +529,53 @@
       if (!cur) return;
       const next = cur.status === "open" ? "processing" : cur.status === "processing" ? "done" : "done";
       try {
-        if (!usingMock) {
+        if (!usingOffline) {
           const res = await fetch(`${API_BASE}/api/tickets/${id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: next }),
+            method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }),
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error);
           cur.status = next;
-        } else {
-          cur.status = next;
-        }
+        } else { cur.status = next; }
       } catch (e) {
-        cur.status = next; // offline demo still works
+        cur.status = next; // 离线时本地流转，保证演示可用
       }
       renderTickets(list);
+      toast(`工单 WO-${String(id).padStart(4, "0")} 已更新为「${STATUS[next][0]}」`);
     }
 
+    /* ---------- 数据加载（实时接口失败时回落到离线样例） ---------- */
+    function rangeQs() {
+      const f = $("dateFrom").value, t = $("dateTo").value;
+      return (f ? `&from=${f}` : "") + (t ? `&to=${t}` : "");
+    }
+    let zoneCount = null;
+
     async function loadAll() {
-      const taz = document.getElementById("zoneSelect").value;
+      const taz = $("zoneSelect").value;
       let overview, series, quality, baseline, tickets;
       try {
         overview = await apiGet(`/api/overview?dt=2022-09-01`);
-        series = await apiGet(`/api/zone/series?taz_id=${encodeURIComponent(taz)}`);
+        series = await apiGet(`/api/zone/series?taz_id=${encodeURIComponent(taz)}${rangeQs()}`);
         quality = await apiGet(`/api/quality`);
-        baseline = await apiGet(`/api/baseline?taz_id=${encodeURIComponent(taz)}`);
+        baseline = await apiGet(`/api/baseline?taz_id=${encodeURIComponent(taz)}${rangeQs()}`);
         tickets = await apiGet(`/api/tickets`);
-        usingMock = false;
-        document.getElementById("modeBadge").textContent = "LIVE API";
-        document.getElementById("modeBadge").className = "badge live";
-        document.getElementById("apiHint").textContent = API_BASE;
+        usingOffline = false;
+        let mode = "";
+        try { mode = ((await apiGet(`/api/health`)) || {}).mode || ""; } catch (e) { /* 健康检查失败不影响展示 */ }
+        $("srcDot").className = "dot on"; $("srcText").textContent = mode === "file" ? "数据源：本地文件 实时" : "数据源：MySQL 实时";
+        $("srcState").title = API_BASE;
       } catch (e) {
-        usingMock = true;
+        usingOffline = true;
         overview = FALLBACK.overview;
         series = { ...FALLBACK.series, taz_id: taz };
         quality = FALLBACK.quality;
         baseline = { ...FALLBACK.baseline, taz_id: taz };
         tickets = JSON.parse(JSON.stringify(FALLBACK.tickets));
-        document.getElementById("modeBadge").textContent = "本地假数据";
-        document.getElementById("modeBadge").className = "badge mock";
-        document.getElementById("apiHint").textContent = `API 未通，已回落假数据（${e.message || e}）`;
+        $("srcDot").className = "dot"; $("srcText").textContent = "数据源：离线样例";
+        $("srcState").title = `接口不可用：${e.message || e}`;
       }
-      renderKpis(overview);
+      renderKpis(overview, zoneCount);
       renderSeries(series);
       renderQuality(quality);
       renderBaseline(baseline);
@@ -275,32 +584,67 @@
     }
 
     async function loadZones() {
-      const sel = document.getElementById("zoneSelect");
+      const sel = $("zoneSelect");
       let ids;
-      try { ids = await apiGet(`/api/zones`); } catch (e) { ids = ["demo_zone_1", "demo_zone_2"]; }
-      sel.innerHTML = ids.map(z => `<option value="${z}">片区 ${z}</option>`).join("");
+      try { ids = await apiGet(`/api/zones`); zoneCount = ids.length; } catch (e) { ids = ["demo_zone_1", "demo_zone_2"]; zoneCount = null; }
+      sel.innerHTML = ids.map(z => `<option value="${z}">片区 ${String(z).replace(/^demo_zone_/, "样例 ")}</option>`).join("");
     }
 
-    document.getElementById("btnRefresh").onclick = loadAll;
-    document.getElementById("zoneSelect").onchange = loadAll;
-    document.getElementById("btnLogin").onclick = async () => {
-      const user = document.getElementById("userInput").value;
-      const role = document.getElementById("roleSelect").value;
+    /* ---------- 路由 / 侧栏 ---------- */
+    function route() {
+      let r = (location.hash.match(/^#\/(\w+)/) || [])[1];
+      if (!ROUTES[r]) r = "overview";
+      const [g, n, d] = ROUTES[r];
+      document.querySelectorAll(".nav li").forEach(li => li.classList.toggle("active", li.dataset.route === r));
+      document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + r));
+      $("crumbGroup").textContent = g; $("crumbCur").textContent = n; $("pageTitle").textContent = n; $("pageDesc").textContent = d;
+      requestAnimationFrame(resizeAll);
+    }
+    const go = r => { location.hash = "#/" + r; };
+    document.querySelectorAll(".nav li").forEach(li => li.onclick = () => go(li.dataset.route));
+    document.querySelectorAll("[data-go]").forEach(a => a.onclick = () => go(a.dataset.go));
+    window.addEventListener("hashchange", route);
+    const autoFold = () => document.body.classList.toggle("folded", localStorage.getItem("SIDER_FOLD") === "1" || window.innerWidth < 1100);
+    $("btnFold").onclick = () => { localStorage.setItem("SIDER_FOLD", document.body.classList.contains("folded") ? "0" : "1"); autoFold(); setTimeout(resizeAll, 170); };
+
+    /* ---------- 用户菜单 / 登录 ---------- */
+    function setUser(d) {
+      currentUser = { user: d.user, role: d.role };
+      const roleCn = d.role === "admin" ? "运维管理员" : "只读访客";
+      $("userName").textContent = d.user; $("popName").textContent = d.user; $("popRole").textContent = roleCn;
+      $("avatar").textContent = String(d.user).slice(0, 1).toUpperCase();
+      renderTickets(ticketList);
+    }
+    $("userBox").onclick = e => { if (e.target.closest(".menu-pop .info")) return; $("userPop").classList.toggle("open"); };
+    document.addEventListener("click", e => { if (!e.target.closest("#userBox")) $("userPop").classList.remove("open"); });
+    $("menuLogin").onclick = () => { $("loginOut").textContent = ""; $("loginMask").classList.add("open"); };
+    $("menuLogout").onclick = () => { setUser({ user: "访客", role: "readonly" }); $("userName").textContent = "只读访客"; $("avatar").textContent = "访"; toast("已退出登录"); };
+    $("btnCloseLogin").onclick = () => $("loginMask").classList.remove("open");
+    $("btnLogin").onclick = async () => {
+      const user = $("userInput").value;
+      const role = $("roleSelect").value;
+      const msg = $("loginOut");
       try {
         const res = await fetch(`${API_BASE}/api/auth/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user, role }),
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user, role }),
         });
         const json = await res.json();
-        document.getElementById("loginOut").textContent = JSON.stringify(json, null, 2);
+        if (!json.ok) { msg.className = "login-msg err"; msg.textContent = json.error || "登录失败"; return; }
+        setUser(json.data);
       } catch (e) {
-        document.getElementById("loginOut").textContent = JSON.stringify({ ok: true, data: { user, role, token: `demo-${role}` }, note: "offline stub" }, null, 2);
+        setUser({ user, role }); // 接口不可用时本地登录，保证演示可用
       }
+      msg.className = "login-msg"; msg.textContent = "";
+      $("loginMask").classList.remove("open");
+      toast(`已登录：${user}（${role === "admin" ? "运维管理员" : "只读访客"}）`);
     };
-    window.addEventListener("resize", () => {
-      chartSeries.resize(); chartQuality.resize(); chartBaseline.resize();
-    });
+
+    $("btnRefresh").onclick = loadAll;
+    $("btnTopRefresh").onclick = loadAll;
+    $("zoneSelect").onchange = loadAll;
+    $("btnReset").onclick = () => { $("dateFrom").value = "2022-09-01"; $("dateTo").value = "2022-09-07"; $("zoneSelect").selectedIndex = 0; loadAll(); };
+    window.addEventListener("resize", () => { autoFold(); resizeAll(); });
+    autoFold(); route();
     loadZones().then(loadAll);
   </script>
 </body>
