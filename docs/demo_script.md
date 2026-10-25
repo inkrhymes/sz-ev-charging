@@ -10,8 +10,8 @@
 1. **KPI 条**：站数 / 片区 / 日均占用率 / 高峰小时 / 卡死站 / 高缺失站 —— 对应 `ads_city_overview` → `/api/overview`。
 2. **占用率时序**：切片区，指出占用率与估算负荷 —— `/api/zone/series`。
 3. **质检数字**：点出缺失率、卡死站、高缺失站 —— 清洗工作量可量化 —— `/api/quality`。
-4. **naive 基线**：真实 vs lag1，说明半个月不做 LSTM，开题分析模块用基线对照 —— `/api/baseline`。
-5. **工单 stub**：把一条 open → processing → done —— 对上开题运维主线。
+4. **naive 基线**：真实 vs lag1，用朴素基线做对照，暂不引入 LSTM —— `/api/baseline`。
+5. **工单 stub**：把一条 open → processing → done —— 演示运维工单流转。
 6. **只读登录**：demo / readonly 拿 token（可选 5s）。
 
 ## 收尾（10s）
