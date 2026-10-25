@@ -132,7 +132,7 @@ def test_cumulative_flag_days_per_station(tmp_path, monkeypatch):
     r = engine.chk_cumulative_flag_days(None, rule, ds="2022-09-04")
     assert not r.passed and r.actual == "1"
     g = r.groups[0]
-    assert g["station_id"] == "0" and g["taz_id"] == "100" and g["metric"] == 4 and "累计卡死 4 天" in g["detail"]
+    assert g["station_id"] == "0" and g["taz_id"] == "100" and g["metric"] == 4 and "已经有 4 天读数一动不动" in g["detail"] and "[告警]" not in g["detail"] and ">=" not in g["detail"]
     # 不读 ds 之后的分区
     r2 = engine.chk_cumulative_flag_days(None, rule, ds="2022-09-02")
     assert r2.passed and r2.groups == []
@@ -170,3 +170,12 @@ def test_station_alerts_idempotent_keep_status():
     assert len(cur.rows) == 1
     assert row["metric_value"] == 31 and row["status"] == "ack" and row["note"] == "已派单"
     assert row["ds"] == "2022-10-01"
+
+
+def test_old_stuck_detail_parsed_and_rerendered():
+    from quality import engine as e
+    old = "[告警] 站 1018（片区 576）截至 2023-02-28 累计卡死 60 天（>= 30 天），首次 2022-09-03、最近 2023-02-28，建议派维修工单核查。"
+    asof, f, l = e._OLD_STUCK.search(old).groups()
+    txt = e.render_stuck_detail("1018", "576", asof, 60, f, l)
+    assert txt == ("站 1018（片区 576）到 2月28日 为止，已经有 60 天读数一动不动，"
+                   "第一次出现在 9月3日，最近一次在 2月28日，建议派人去现场看看。【提醒】")

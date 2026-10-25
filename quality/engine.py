@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import os
 import sys
 import uuid
@@ -202,6 +203,22 @@ def _lake_daily_flags(rule, ds):
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
+def _md(d):
+    t = pd.Timestamp(str(d))
+    return f"{t.month}月{t.day}日"
+
+
+def render_stuck_detail(station, taz, ds, days, first_dt, last_dt):
+    """累计卡死站的大白话说明。"""
+    zone = f"片区 {taz}" if taz not in (None, "") else "片区未知"
+    return (f"站 {station}（{zone}）到 {_md(ds)} 为止，已经有 {int(days)} 天读数一动不动，"
+            f"第一次出现在 {_md(first_dt)}，最近一次在 {_md(last_dt)}，建议派人去现场看看。【提醒】")[:500]
+
+
+# 旧版站点级 detail：从中解析截至日/首次/最近日期，供 --refresh-details 重写
+_OLD_STUCK = re.compile(r"截至 (\d{4}-\d{2}-\d{2}) 累计卡死 \d+ 天.*?首次 (\d{4}-\d{2}-\d{2})、最近 (\d{4}-\d{2}-\d{2})")
+
+
 def chk_cumulative_flag_days(df, rule, ds=None, history=None, **_):
     """截至 ds（含）累计 flag 为真天数 >= min_days 的站；明细放进 groups，写 dq_alert 时每站一行。"""
     key, need = rule.get("group_by", "station_id"), rule["min_days"]
@@ -213,9 +230,8 @@ def chk_cumulative_flag_days(df, rule, ds=None, history=None, **_):
     hit = agg[agg["days"] >= need].reset_index()
     groups = [{"station_id": str(r[key]), "taz_id": None if pd.isna(r["taz_id"]) else str(int(r["taz_id"])),
                "metric": int(r["days"]),
-               "detail": f"[告警] 站 {r[key]}（片区 {int(r['taz_id']) if not pd.isna(r['taz_id']) else '未知'}）"
-                         f"截至 {ds} 累计卡死 {int(r['days'])} 天（>= {need} 天），"
-                         f"首次 {r['first_dt']}、最近 {r['last_dt']}，建议派维修工单核查。"}
+               "detail": render_stuck_detail(r[key], None if pd.isna(r["taz_id"]) else int(r["taz_id"]),
+                                             ds, int(r["days"]), r["first_dt"], r["last_dt"])}
               for _, r in hit.iterrows()]
     res = _r(rule, not groups, len(groups), f"累计卡死>={need}天的{key}数=0",
              f"截至 {ds} 累计 {rule['column']} 天数>={need} 的{key}数")
@@ -418,6 +434,15 @@ def refresh_details():
                 rule = rules.get(name, {"severity": sev})
                 n += cur.execute("UPDATE dq_alert SET detail=%s, updated_at=updated_at WHERE alert_id=%s",
                                  (render_detail(rule, ds, mv, thr), aid))
+            # 站点级累计卡死告警：用存量 metric_value + 旧 detail 里的日期重写；已是新格式的跳过
+            cur.execute("SELECT alert_id, station_id, taz_id, metric_value, detail FROM dq_alert"
+                        " WHERE station_id IS NOT NULL")
+            for aid, sid, taz, mv, det in cur.fetchall():
+                m = _OLD_STUCK.search(det or "")
+                if m:
+                    asof, f, l = m.groups()
+                    n += cur.execute("UPDATE dq_alert SET detail=%s, updated_at=updated_at WHERE alert_id=%s",
+                                     (render_stuck_detail(sid, taz, asof, mv, f, l), aid))
     finally:
         conn.close()
     return n
@@ -425,7 +450,7 @@ def refresh_details():
 
 def main(argv=None):
     if argv is None and sys.argv[1:2] == ["--refresh-details"] or argv == ["--refresh-details"]:
-        print(f"[dq] refreshed {refresh_details()} rule-level alert details")
+        print(f"[dq] refreshed {refresh_details()} alert details (rule-level + station-level)")
         return 0
     ap = argparse.ArgumentParser()
     ap.add_argument("--layer", required=True)
