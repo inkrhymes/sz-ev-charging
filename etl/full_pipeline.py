@@ -226,17 +226,20 @@ def daily_stuck(q):
     days = {}
     for sid, ds in zip(q.station_id, q.stuck_dates):
         for d in ds: days.setdefault(d, set()).add(sid)
-    alld = sorted(days); rows = []; prev = set()
+    alld = sorted(days); rows = []; prev = None
     for d in pd.date_range(min(alld), max(alld)).strftime("%Y-%m-%d") if alld else []:
         cur = days.get(d, set())
-        rows.append(dict(dt=d, stuck=len(cur), new_stuck=len(cur - prev))); prev = cur
-    return pd.DataFrame(rows, columns=["dt", "stuck", "new_stuck"])
+        # first day has no "yesterday": new_stuck undefined (excluded from p95 and warning)
+        rows.append(dict(dt=d, stuck=len(cur), new_stuck=pd.NA if prev is None else len(cur - prev))); prev = cur
+    df = pd.DataFrame(rows, columns=["dt", "stuck", "new_stuck"])
+    df["new_stuck"] = df["new_stuck"].astype("Int64")
+    return df
 
 
 def write_quality(q, a, tag):
     tot = q.rows.sum(); miss = q.missing_rows.sum()
     dd = daily_stuck(q)
-    warn = dd[(dd.stuck > WARN_STUCK_STATIONS) | (dd.new_stuck > WARN_NEW_STUCK)]
+    warn = dd[(dd.stuck > WARN_STUCK_STATIONS) | (dd.new_stuck.fillna(-1) > WARN_NEW_STUCK)]
     sd = q.stuck_days
     lines = [f"# 全量数据质检报告（{a.start} ~ {a.end}）", "",
              "由 `etl/full_pipeline.py --write-report` 生成。规则：",
@@ -244,6 +247,7 @@ def write_quality(q, a, tag):
              "- 卡死：某站某天连同前 6 天（共 7 天）的有效 busy 只有一个取值（≥12 点），按站按天标记，与运行区间无关。",
              "- 异常：busy 超出该站同一 7 天窗口的 IQR 1.5 倍边界。",
              f"- 单日卡死只做**预警**，不开工单：当天卡死站数 > {WARN_STUCK_STATIONS} 或新增卡死站数 > {WARN_NEW_STUCK}（两个阈值取 181 天的 P95）。",
+             "  - 新增卡死口径：180 对相邻两天，统计「当天 is_stuck 且前一天不是」的站数，首日（无前一天）不计；P95 = 63.25，取 63。",
              f"- 累计卡死 ≥ {REPAIR_STUCK_DAYS} 天：建议**维修**工单；缺失率 > {HIGH_MISSING_THR:.0%}（且未到维修）：建议**巡检**。", "",
              "| 指标 | 数值 |", "|---|---|",
              f"| 站点数 | {len(q)} |", f"| 片区数（TAZ） | {q.taz_id.nunique()} |",
@@ -264,7 +268,7 @@ def write_quality(q, a, tag):
                   f"P50 / P95 / 最大：当天卡死 {dd.stuck.quantile(.5):.0f} / {dd.stuck.quantile(.95):.0f} / {dd.stuck.max()}；"
                   f"新增 {dd.new_stuck.quantile(.5):.0f} / {dd.new_stuck.quantile(.95):.0f} / {dd.new_stuck.max()}。"]
         if len(warn):
-            lines += ["", "触发预警的日期：" + "、".join(f"{r.dt}（{r.stuck}/{r.new_stuck}）" for r in warn.itertuples()) + "（括号内为 当天卡死/新增）。"]
+            lines += ["", "触发预警的日期：" + "、".join(f"{r.dt}（{r.stuck}/{'–' if pd.isna(r.new_stuck) else r.new_stuck}）" for r in warn.itertuples()) + "（括号内为 当天卡死/新增）。"]
     lines += ["", "## 缺失率最高的 15 个站点", "",
               "| station_id | taz_id | missing_rate | stuck_days | gap_days_max | ticket |", "|---|---|---|---|---|---|"]
     for r in q.sort_values("missing_rate", ascending=False).head(15).itertuples():
