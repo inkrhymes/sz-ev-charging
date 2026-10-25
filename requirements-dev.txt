@@ -8,3 +8,4 @@ pyarrow>=14
 shapely>=2.0
 pyshp>=2.3
 fakeredis>=2.20
+kafka-python-ng>=2.2
