@@ -90,6 +90,7 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 - 覆盖：清洗和质检规则（用自己造的小数据跑 `etl/clean_to_dwd.py`）；接口（Flask 自带的测试客户端，文件模式下的总览、片区、站点、和上小时比、工单、告警、登录，数字和验收清单一致）；MySQL 模式（用假的查库函数替代真库，检查字段和文件模式一样，连不上时退回文件）；预测特征（只用过去的数据、不跨片区、按时间切分）；调度和质检引擎（`tests/orchestration/`，没装 Airflow 的那一项会跳过）。
 - 防回归：工单和告警改状态只认登录 token，访客 403、没登录或 token 不对 401，开了 `ALERT_DB=mysql` 也一样，而且没权限时不会写库；导入 app 时地图、告警、工单路由都要在（防止以前的 405 再出现）。
 - 设 `SZ_TEST_MYSQL=1` 时会额外连真实 `sz_ev` 做冒烟测试，平时跳过。
+- 线上冒烟：服务起来后跑 `python scripts/smoke_live.py [--base http://localhost:5000]`，只读检查 8 项：health 为 mysql 且未退回、`X-Data-Source` 响应头、331 个片区、片区曲线非空、预测时段 `y_hat_lgbm` 有值、地图和告警接口 200、访客改告警 403、不带 token 401（用不存在的 id，不会改数据）。打印中文通过/失败表，有失败退出码为 1。
 
 **CI**
 - `.github/workflows/ci.yml`：推到 main 或开 PR 时自动跑全部 pytest 和一次预测冒烟训练；另一个任务用 `scripts/start.sh` 起整套 Docker 服务，探一下关键接口（这个任务失败不挡合并）。
