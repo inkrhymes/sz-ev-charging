@@ -1,0 +1,10 @@
+# ods 层：每日原始 5 分钟数据（一个 dt 分区）
+# severity: block = 失败阻断下游；warn = 只记录
+rules:
+  - {name: ods_row_count_min, type: row_count_min, min: 1, severity: block}
+  - {name: ods_row_count_vs_prev_day, type: row_count_delta, max_ratio: 0.5, severity: block}
+  - {name: ods_pk_unique, type: duplicate_key, keys: [station_id, ts], severity: block}
+  - {name: ods_freshness, type: freshness, column: ts, min_end_offset: 23h, severity: block}
+  - {name: ods_busy_non_negative, type: range, column: busy, min: 0, severity: block}
+  # 真实数据特征：演示集整体缺数比例约 26.42%，只告警
+  - {name: ods_row_not_null_rate, type: not_null_rate, columns: [busy, idle], mode: any, min: 0.80, severity: warn}

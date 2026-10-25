@@ -1,0 +1,8 @@
+rules:
+  - {name: dwd_row_count_min, type: row_count_min, min: 1, severity: block}
+  - {name: dwd_pk_unique, type: duplicate_key, keys: [station_id, ts], severity: block}
+  - {name: dwd_occupancy_range, type: range, column: occupancy, min: 0, max: 1, severity: block}
+  - {name: dwd_total_piles_positive, type: range, column: total_piles, min: 1, severity: block}
+  # 以下为真实数据特征（14 天窗口：读数异常 4 站、缺数偏多 6 站），只告警
+  - {name: dwd_high_missing_stations, type: group_null_rate, columns: [busy, idle], group_by: station_id, threshold: 0.30, max_groups: 0, severity: warn}
+  - {name: dwd_stuck_stations_full_day, type: stuck_value, column: busy, group_by: station_id, order_by: ts, n_slots: 288, max_groups: 0, severity: warn}
