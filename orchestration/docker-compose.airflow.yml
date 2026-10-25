@@ -33,6 +33,8 @@ services:
     user: "1000:0"              # 与宿主 box 用户一致，写湖文件属主不变
     volumes:
       - ../:/repo
+      # Hive metastore（derby）里记的是宿主机绝对路径的表位置，仓库再按宿主路径挂一份，否则 PATH_NOT_FOUND
+      - ${SZ_REPO_HOST:-/workspace/xb-wt}:${SZ_REPO_HOST:-/workspace/xb-wt}
       - /workspace/sz-ev-charging/data/lake:/workspace/sz-ev-charging/data/lake   # 真实数据湖，读写
       - /workspace/thesis_ev_data:/workspace/thesis_ev_data:ro                     # 原始 CSV
     command: standalone

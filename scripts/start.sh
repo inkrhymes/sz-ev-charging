@@ -13,6 +13,12 @@ fi
 if [ -x .venv/bin/python ]; then PY=.venv/bin/python; else PY=.venv/Scripts/python.exe; fi
 "$PY" -m pip install -q -r etl/requirements.txt
 
+# 重启后容器间 TCP 不通的修复（best-effort）：关掉 bridge 流量过 iptables
+if [ "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables 2>/dev/null || echo 0)" = 1 ]; then
+  { sysctl -w net.bridge.bridge-nf-call-iptables=0 || sudo -n sysctl -w net.bridge.bridge-nf-call-iptables=0; } >/dev/null 2>&1 \
+    || echo "  [warn] 无法设置 net.bridge.bridge-nf-call-iptables=0，容器间连不通时请手动 sudo 执行"
+fi
+
 echo "[1/5] 启动 MySQL"
 docker compose up -d mysql
 until [ "$(docker inspect -f '{{.State.Health.Status}}' sz-ev-mysql)" = healthy ]; do sleep 2; done

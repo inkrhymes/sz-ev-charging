@@ -140,8 +140,8 @@ def _never_reporting(rule) -> set:
     lake = Path(os.getenv("SZ_EV_LAKE", ROOT / "data" / "lake"))
     qdir = lake / rule.get("exclude_from", "dwd/quality_station")
     full = qdir / rule.get("exclude_run", "run=2022-09-01_2023-02-28")
-    src = full if full.exists() else qdir
-    q = read_frame(src) if src.exists() else pd.DataFrame()
+    # 只认全量 run 目录；同层其它单日 run=* 目录是旧结果，不能回退去读整个目录
+    q = read_frame(full) if full.exists() else pd.DataFrame()
     if q.empty or "missing_rate" not in q.columns:
         return set()
     return set(q.loc[q["missing_rate"] >= 1, "station_id"])

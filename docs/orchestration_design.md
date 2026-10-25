@@ -89,3 +89,34 @@ docker compose -f orchestration/docker-compose.airflow.yml up -d     # 首次约
 docker compose -f orchestration/docker-compose.airflow.yml down
 ```
 本地 Web 界面：http://localhost:8080（admin / admin，仅本机演示用）。
+
+## 真实数据 Airflow 实测（2026-10-25，重启恢复后）
+
+环境：`sz-ev-airflow:2.9.3-spark3.5.3`（镜像重建 1 分 56 秒），LocalExecutor，`mem_limit: 5g`，MySQL 数据目录 `data/mysql`（启动时务必传 `MYSQL_DATA_DIR`）。
+
+| ds | 结果 | 耗时 |
+|---|---|---|
+| 2022-09-02 | 7 个任务全部 success，publish 重新写回 09-02（ads_zone_occupancy_hour 当天 7,761 行，全表 1,338,568 行） | 2 分 12 秒 |
+| 2022-10-25 | 7/7 success | ≈2 分 05 秒 |
+| 2022-10-26 | 7/7 success | ≈2 分 00 秒 |
+| 2022-10-27 | dq_dwd **BLOCK**（dwd_station_went_empty：838 个站前一天有数、当天全空，阈值 ≤50）；ads_build / dq_ads / publish = upstream_failed | ≈1 分 15 秒 |
+| 2022-10-28 | 7/7 success（backfill 遇到失败即停，10-28 单独补跑） | 2 分 12 秒 |
+
+单日各步：ods_ingest ≈21s、dwd_build ≈21s、ads_build ≈19s（Spark）、publish ≈9s，三个 dq 门禁各 <2s，其余为调度间隔。
+
+内存（docker stats 每 3 秒采样，日志 `/workspace/airflow_docker_stats.log`）：airflow 峰值 4.86 GiB（接近 5g 上限），MySQL 0.77 GiB，API 0.06 GiB，合计峰值 5.68 GiB（<7G 目标）。
+
+质检重建（181 天 × ods/dwd/ads，只跑 dq、不写湖，60 秒）：dq_alert 共 661 行，全部 open——规则级 500 行（ods 51、dwd 439、ads 10），站点级累计卡死≥30 天 161 行（截至 02-28，与 quality_station 一致）。dwd 门禁 block 的日子：10-27、11-02、01-23、02-02、02-05、02-10、02-12、02-15、02-22。
+
+### 踩坑与修复
+
+- `ads_metrics.py` 在 f-string 里嵌套三引号 f-string，只有 Python 3.12 能解析；Airflow 镜像是 3.11，ads_build 直接 SyntaxError。已改为先拼 `qs_sql` 再插入。
+- Hive metastore（derby）记录的是宿主机绝对路径（如 `/workspace/xb-wt/data/warehouse/...`），容器里只有 `/repo` 会 PATH_NOT_FOUND。compose 现在把仓库再按宿主路径挂一份（`SZ_REPO_HOST`，默认 `/workspace/xb-wt`）。
+- 质检引擎读 `dwd/quality_station` 时只认全量目录 `run=2022-09-01_2023-02-28`，不再回退去读整个目录（其它单日 run 目录是旧数据）。
+- 非 block 任务失败会重试 2 次、间隔 5 分钟，所以失败的一天要约 12 分钟才结束；排查时直接在容器里手跑脚本更快。
+
+### 重启恢复备忘
+
+1. `sudo dockerd &`（box 不自启 Docker）。
+2. 容器间 TCP 不通时：`sudo sysctl -w net.bridge.bridge-nf-call-iptables=0`（`scripts/start.sh` 会尽量自动设置；Airflow 用 host 网络，同样依赖宿主机这项设置）。
+3. `MYSQL_DATA_DIR=/workspace/sz-ev-charging/data/mysql` 起 MySQL，再起 API；Airflow 用 `docker compose -f orchestration/docker-compose.airflow.yml up -d`，用完 `down`。

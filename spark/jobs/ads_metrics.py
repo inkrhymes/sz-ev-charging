@@ -140,6 +140,16 @@ def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts
     has_qs = qs is not None
     if has_qs:
         spark.read.parquet(qs).createOrReplaceTempView("v_quality_station")
+    # Python 3.11（Airflow 镜像）不支持 f-string 内嵌同类三引号，先单独拼好
+    qs_sql = "" if not has_qs else f"""
+      UNION ALL SELECT 'stuck_station_cnt', CAST(SUM(CASE WHEN stuck_days >= {REPAIR_STUCK_DAYS} THEN 1 ELSE 0 END) AS DOUBLE),
+                       '累计卡死≥{REPAIR_STUCK_DAYS}天的站（口径同 dq_alert，读 dwd/quality_station.stuck_days）' FROM v_quality_station
+      UNION ALL SELECT 'stuck_any_day_cnt', CAST(SUM(CASE WHEN stuck_days > 0 THEN 1 ELSE 0 END) AS DOUBLE),
+                       '至少有一天卡死的站' FROM v_quality_station
+      UNION ALL SELECT 'repair_ticket_cnt', CAST(SUM(CASE WHEN ticket_suggest = 'repair' THEN 1 ELSE 0 END) AS DOUBLE),
+                       '建议维修工单的站（dwd/quality_station.ticket_suggest=repair）' FROM v_quality_station
+      UNION ALL SELECT 'inspect_ticket_cnt', CAST(SUM(CASE WHEN ticket_suggest = 'inspect' THEN 1 ELSE 0 END) AS DOUBLE),
+                       '建议巡检工单的站（ticket_suggest=inspect）' FROM v_quality_station"""
     spark.sql(f"""INSERT OVERWRITE TABLE ads.quality_summary
       WITH w AS (SELECT station_id,
                         CASE WHEN SUM(valid_cnt) >= 12 AND MIN(min_busy) = MAX(max_busy) THEN 1 ELSE 0 END st
@@ -151,15 +161,7 @@ def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts
       UNION ALL SELECT 'stuck_whole_window_cnt', CAST(SUM(st) AS DOUBLE), '整个已入仓窗口内读数从没变过的站（全程卡死）' FROM s
       UNION ALL SELECT 'high_missing_station_cnt', CAST(SUM(CASE WHEN m/r > {HIGH_MISSING_THR} THEN 1 ELSE 0 END) AS DOUBLE),
                        '缺数比例>30% 的站' FROM s
-      {"" if not has_qs else f"""
-      UNION ALL SELECT 'stuck_station_cnt', CAST(SUM(CASE WHEN stuck_days >= {REPAIR_STUCK_DAYS} THEN 1 ELSE 0 END) AS DOUBLE),
-                       '累计卡死≥{REPAIR_STUCK_DAYS}天的站（口径同 dq_alert，读 dwd/quality_station.stuck_days）' FROM v_quality_station
-      UNION ALL SELECT 'stuck_any_day_cnt', CAST(SUM(CASE WHEN stuck_days > 0 THEN 1 ELSE 0 END) AS DOUBLE),
-                       '至少有一天卡死的站' FROM v_quality_station
-      UNION ALL SELECT 'repair_ticket_cnt', CAST(SUM(CASE WHEN ticket_suggest = 'repair' THEN 1 ELSE 0 END) AS DOUBLE),
-                       '建议维修工单的站（dwd/quality_station.ticket_suggest=repair）' FROM v_quality_station
-      UNION ALL SELECT 'inspect_ticket_cnt', CAST(SUM(CASE WHEN ticket_suggest = 'inspect' THEN 1 ELSE 0 END) AS DOUBLE),
-                       '建议巡检工单的站（ticket_suggest=inspect）' FROM v_quality_station"""}""")
+      {qs_sql}""")
     perf.step("quality_summary", spark.table("ads.quality_summary").count(), t)
 
 
