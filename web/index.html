@@ -124,6 +124,16 @@
     .tag.success { background:var(--success-1); color:var(--success-6); }
     .tag.gray { background:var(--fill-2); color:var(--text-2); }
     .tag.blue { background:var(--primary-1); color:var(--primary-6); }
+    .tk-time { display:flex; gap:48px; flex-wrap:wrap; }
+    .tk-time div { display:flex; flex-direction:column; gap:4px; }
+    .tk-time b { font-size:22px; font-weight:500; color:var(--text-1); }
+    .tk-time span { font-size:12px; color:var(--text-3); }
+    .flow { display:flex; gap:0; padding:8px 0 4px; flex-wrap:wrap; }
+    .flow .st { position:relative; flex:1; min-width:150px; padding:0 12px 0 22px; font-size:12px; color:var(--text-3); }
+    .flow .st::before { content:""; position:absolute; left:4px; top:5px; width:10px; height:10px; border-radius:50%; background:var(--fill-2); border:1px solid var(--border); }
+    .flow .st.on::before { background:var(--primary-6); border-color:var(--primary-6); }
+    .flow .st.ok::before { background:var(--success-6); border-color:var(--success-6); }
+    .flow .st b { display:block; font-weight:500; color:var(--text-1); font-size:13px; margin-bottom:2px; }
     .pager { display:flex; justify-content:flex-end; align-items:center; gap:8px; padding-top:16px; font-size:12px; color:var(--text-3); }
     .pager .pg { min-width:32px; height:32px; line-height:30px; text-align:center; border:1px solid var(--border); border-radius:2px; color:var(--text-2); background:var(--bg-white); cursor:pointer; font-size:14px; }
     .pager .pg.cur { border-color:var(--primary-6); color:var(--primary-6); }
@@ -318,10 +328,12 @@
 
     <!-- 运维工单 -->
     <section class="view" id="view-tickets">
+      <div class="card" style="margin-bottom:16px"><div class="card-head"><div class="card-title">处理用时<span class="tip" data-tip="从派工单到标记完成用了多久；系统只记了每张工单最后一次改动的时间"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
+        <div class="card-body"><div id="ticketTime" class="tk-time"></div></div></div>
       <div class="card">
         <div class="tabs" id="ticketTabs"></div>
         <div class="card-body">
-          <table><thead><tr><th>单号</th><th>站</th><th>类型</th><th>状态</th><th>操作</th></tr></thead><tbody id="ticketBody"></tbody></table>
+          <table><thead><tr><th>单号</th><th>站</th><th>类型</th><th>状态</th><th>经过</th><th>操作</th></tr></thead><tbody id="ticketBody"></tbody></table>
           <div class="pager" id="ticketPager"></div>
         </div>
       </div>
@@ -701,6 +713,41 @@
     $("stationZone").onchange = () => { stQ.taz_id = $("stationZone").value; stQ.page = 1; loadStations(); };
 
     /* ---------- 运维工单 ---------- */
+    /* 工单经过：告警发现 → 派工单 → 处理中 → 处理完 → 复查通过自动关闭（只读，按现有记录拼出来） */
+    const openFlows = new Set();
+    const toDate = v => v ? new Date(String(v).replace(" ", "T")) : null;
+    function fmtDur(ms) {
+      if (ms == null || isNaN(ms)) return "—";
+      const m = Math.max(0, Math.round(ms / 60000));
+      if (m < 60) return `${m} 分钟`;
+      const h = m / 60;
+      return h < 48 ? `${+h.toFixed(1)} 小时` : `${+(h / 24).toFixed(1)} 天`;
+    }
+    function ticketFlow(t) {
+      const a = t.alert_id != null ? alertList.find(x => x.alert_id === t.alert_id) : null;
+      const st = t.status, step = (cls, title, sub) => `<div class="st ${cls}"><b>${title}</b>${sub}</div>`;
+      const noTime = "没有单独记时间";
+      const steps = [
+        a ? step("ok", "发现问题", `${a.ds ? `数据日期 ${String(a.ds).slice(0, 10)}<br>` : ""}${a.created_at || ""} · AL-${String(a.alert_id).padStart(4, "0")}`)
+          : step("", "发现问题", t.alert_id != null ? `AL-${String(t.alert_id).padStart(4, "0")}（告警没加载到）` : "手动开的单，没有对应告警"),
+        step("ok", "派工单", t.created_at || "—"),
+        step(st === "processing" ? "on" : st === "done" ? "ok" : "", "开始处理", st === "processing" ? (t.updated_at || "—") : st === "done" ? noTime : "还没开始"),
+        step(st === "done" ? "ok" : "", "处理完成", st === "done" ? `${t.updated_at || "—"}<br>用时 ${fmtDur(toDate(t.updated_at) - toDate(t.created_at))}` : "还没完成"),
+        a && a.status === "closed" ? step("ok", /自动关闭/.test(a.note || "") ? "复查通过，自动关闭" : "告警已关闭", `${a.updated_at || ""}${a.note ? `<br>${escHtml(a.note)}` : ""}`)
+          : step("", "告警关闭", a ? "告警还没关，复查通过后会自动关" : "—"),
+      ];
+      return `<div class="flow">${steps.join("")}</div>`;
+    }
+    function renderTicketTime() {
+      const done = ticketList.filter(t => t.status === "done" && t.created_at && t.updated_at).map(t => toDate(t.updated_at) - toDate(t.created_at)).filter(v => !isNaN(v)).sort((x, y) => x - y);
+      const left = ticketList.filter(t => t.status !== "done" && t.created_at).map(t => Date.now() - toDate(t.created_at)).filter(v => !isNaN(v));
+      const avg = done.length ? done.reduce((x, y) => x + y, 0) / done.length : null;
+      const mid = done.length ? done[Math.floor((done.length - 1) / 2)] : null;
+      const closed = ticketList.filter(t => t.alert_id != null && (alertList.find(a => a.alert_id === t.alert_id) || {}).status === "closed").length;
+      const items = [[fmtDur(avg), `平均用时（${done.length} 张已完成）`], [fmtDur(mid), "一半工单在这个时间内完成"], [done.length ? fmtDur(done[done.length - 1]) : "—", "最慢的一张"],
+        [left.length ? fmtDur(Math.max(...left)) : "—", `没完成的单里等得最久的（${left.length} 张）`], [String(closed), "对应告警已关闭"]];
+      $("ticketTime").innerHTML = ticketList.length ? items.map(([v, n]) => `<div><b class="num">${v}</b><span>${n}</span></div>`).join("") : `<span class="readonly-note">暂无工单</span>`;
+    }
     function renderTickets(list) {
       ticketList = list || [];
       const cnt = s => ticketList.filter(t => s === "all" || t.status === s).length;
@@ -716,8 +763,11 @@
           : t.status === "done" ? '<span class="readonly-note">—</span>'
           : `<a data-id="${t.ticket_id}">${NEXT_LABEL[t.status]}</a>`;
         return `<tr><td class="num" style="text-align:left">WO-${String(t.ticket_id).padStart(4, "0")}</td><td>站点 ${t.station_id}</td>
-          <td><span class="tag gray">${TYPE_CN[t.type] || "其他"}</span>${t.alert_id != null ? `<span class="readonly-note" style="margin-left:6px">来自告警 AL-${String(t.alert_id).padStart(4, "0")}</span>` : ""}</td><td><span class="tag ${color}">${cn}</span></td><td>${op}</td></tr>`;
-      }).join("") : `<tr><td colspan="5" class="empty">暂无工单</td></tr>`;
+          <td><span class="tag gray">${TYPE_CN[t.type] || "其他"}</span>${t.alert_id != null ? `<span class="readonly-note" style="margin-left:6px">来自告警 AL-${String(t.alert_id).padStart(4, "0")}</span>` : ""}</td><td><span class="tag ${color}">${cn}</span></td><td><a data-flow="${t.ticket_id}">${openFlows.has(t.ticket_id) ? "收起" : "看经过"}</a></td><td>${op}</td></tr>`
+          + (openFlows.has(t.ticket_id) ? `<tr class="flow-row"><td colspan="6">${ticketFlow(t)}</td></tr>` : "");
+      }).join("") : `<tr><td colspan="6" class="empty">暂无工单</td></tr>`;
+      body.querySelectorAll("a[data-flow]").forEach(a => a.onclick = () => { const id = +a.dataset.flow; openFlows.has(id) ? openFlows.delete(id) : openFlows.add(id); renderTickets(ticketList); });
+      renderTicketTime();
       body.querySelectorAll("a[data-id]").forEach(a => a.onclick = () => advanceTicket(+a.dataset.id, ticketList));
       pager($("ticketPager"), shown.length, 1, 10, () => {});
       // 总览页工单概况
@@ -920,7 +970,7 @@
     }
     ["alertLevel", "alertZone"].forEach(id => $(id).onchange = () => { alertPage = 1; renderAlerts(); });
     $("alertQ").oninput = () => { alertPage = 1; renderAlerts(); };
-    async function loadAlerts() { alertList = (await fetchAlerts()).map(a => ({ ...a, status: a.status === "processing" ? "ack" : a.status })); renderAlerts(); }
+    async function loadAlerts() { alertList = (await fetchAlerts()).map(a => ({ ...a, status: a.status === "processing" ? "ack" : a.status })); renderAlerts(); if (typeof ticketList !== "undefined" && ticketList) renderTickets(ticketList); }
     function renderAlerts() {
       const cnt = s => alertList.filter(a => s === "all" || a.status === s).length;
       $("alertTabs").innerHTML = [["all", "全部"], ["open", "待处理"], ["ack", "处理中"], ["closed", "已关闭"]]
