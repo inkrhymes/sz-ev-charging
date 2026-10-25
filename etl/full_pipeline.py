@@ -172,6 +172,8 @@ def main():
     taz = dict(zip(info.station_id.astype(int), info.TAZID.astype(int)))
     si = LAKE / "ods" / "station_info"; si.mkdir(parents=True, exist_ok=True)
     info.rename(columns={"TAZID": "taz_id"}).astype({"station_id": "int32", "taz_id": "int32"}).to_parquet(si / "part-0.parquet", index=False)
+    import pile_power  # enrich station_info with rated power columns (else this rewrite would drop them)
+    print("pile_power", pile_power.build(lake=LAKE), flush=True)
     stg = LAKE / "_staging" / f"{tag}_{os.getpid()}"  # per-process: concurrent runs on the shared box must not clobber each other
     shutil.rmtree(stg, ignore_errors=True); stg.mkdir(parents=True)
     m = {}
