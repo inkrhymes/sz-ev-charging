@@ -300,6 +300,7 @@
               <button class="btn" id="mapPlay" type="button">播放</button>
               <a id="mapAllDay">看全天平均</a>
               <span id="mapTimeHint" style="color:var(--text-3)"></span>
+              <span id="mapGreyNote" style="color:var(--text-3);font-size:12px;display:none"><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#C9CDD4;margin-right:4px;vertical-align:-1px"></i>灰色＝这一小时没有数据</span>
             </div>
             <div id="chartMap" style="height:460px"></div></div></div>
         <div class="card col-8"><div class="card-head"><div class="card-title">最忙的片区</div></div>
@@ -891,6 +892,7 @@
       const hz = (mapHourly && mapHourly.zones) || {};
       const has = Object.keys(hz).length > 0;
       $("mapTimeHint").textContent = !mapHourOn ? "现在是全天平均" : has ? `${$("mapDate").value} ${String(h).padStart(2, "0")}:00 各片区占用率` : "这一天没有按小时的数据";
+      $("mapGreyNote").style.display = mapHourOn ? "" : "none";
       const occ = d => mapHourOn ? ((hz[String(d.taz_id)] || [])[h] ?? null) : d.avg_occupancy;
       charts.chartMap.setOption({ series: [{ data: mapData.zones.map(d => { const o = occ(d); return { value: [d.lon, d.lat], raw: { ...d, avg_occupancy: o }, itemStyle: { color: occColor(o), opacity: .85 } }; }) }, {}] });
     }
