@@ -167,17 +167,33 @@ def main():
     cur.execute(
         """
         INSERT INTO ads_city_overview (dt, station_cnt, zone_cnt, avg_occupancy, peak_hour, stuck_cnt, high_missing_cnt)
-        SELECT DATE(ts_hour),
-               (SELECT COUNT(*) FROM dwd_quality_station),
-               COUNT(DISTINCT taz_id),
-               AVG(occupancy_avg),
-               (SELECT HOUR(ts_hour) FROM dwd_zone_hour z2
-                 WHERE DATE(z2.ts_hour)=DATE(dwd_zone_hour.ts_hour)
-                 GROUP BY HOUR(ts_hour) ORDER BY AVG(occupancy_avg) DESC LIMIT 1),
-               (SELECT COUNT(*) FROM dwd_quality_station WHERE stuck_flag=1),
-               (SELECT COUNT(*) FROM dwd_quality_station WHERE missing_rate>0.30)
-        FROM dwd_zone_hour
-        GROUP BY DATE(ts_hour)
+        SELECT
+          d.dt,
+          (SELECT COUNT(*) FROM dwd_quality_station),
+          d.zone_cnt,
+          d.avg_occupancy,
+          p.peak_hour,
+          (SELECT COUNT(*) FROM dwd_quality_station WHERE stuck_flag=1),
+          (SELECT COUNT(*) FROM dwd_quality_station WHERE missing_rate>0.30)
+        FROM (
+          SELECT DATE(ts_hour) AS dt,
+                 COUNT(DISTINCT taz_id) AS zone_cnt,
+                 AVG(occupancy_avg) AS avg_occupancy
+          FROM dwd_zone_hour
+          GROUP BY DATE(ts_hour)
+        ) d
+        LEFT JOIN (
+          SELECT dt, peak_hour
+          FROM (
+            SELECT DATE(ts_hour) AS dt,
+                   HOUR(ts_hour) AS peak_hour,
+                   AVG(occupancy_avg) AS occ,
+                   ROW_NUMBER() OVER (PARTITION BY DATE(ts_hour) ORDER BY AVG(occupancy_avg) DESC) AS rn
+            FROM dwd_zone_hour
+            GROUP BY DATE(ts_hour), HOUR(ts_hour)
+          ) x
+          WHERE rn = 1
+        ) p ON p.dt = d.dt
         ON DUPLICATE KEY UPDATE
           station_cnt=VALUES(station_cnt), zone_cnt=VALUES(zone_cnt),
           avg_occupancy=VALUES(avg_occupancy), peak_hour=VALUES(peak_hour),

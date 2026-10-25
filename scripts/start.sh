@@ -17,11 +17,11 @@ done
 
 echo "[3/5] 准备 demo CSV（缺失时由 ETL 重新生成）"
 if [ ! -f data/demo/dwd/dwd_station_5min_clean.csv ]; then
-  python3 etl/load_ods.py && python3 etl/clean_to_dwd.py
+  .venv/bin/python etl/load_ods.py && .venv/bin/python etl/clean_to_dwd.py
 fi
 
 echo "[4/5] 装载 CSV 到 MySQL 并回填 ads"
-MYSQL_USER=root MYSQL_PASSWORD="$MYSQL_ROOT_PASSWORD" python3 etl/load_mysql_from_demo.py
+MYSQL_USER=root MYSQL_PASSWORD="$MYSQL_ROOT_PASSWORD" .venv/bin/python etl/load_mysql_from_demo.py
 
 echo "[5/5] 启动 API 与大屏"
 docker compose up -d --build api
