@@ -61,6 +61,15 @@ flowchart LR
 | `/api/runs`、`/api/ops/runs` | ops_task_run |
 | `/api/ops/health_metrics` | dq_alert、dq_run_log、ops_task_run、ads_zone_occupancy_hour、ads_forecast_zone_hour |
 
+## 前端页面
+
+页面 `#/lineage`（菜单「数据治理」）把血缘画成六列：原始文件、数据湖、Hive、消息流与文件、业务库、接口。
+
+- 点一个节点，会标亮它的上游和下游，并显示产出它的脚本和调度任务。
+- 可以按表名搜索。
+
+![数据血缘页](screenshots/lineage.png)
+
 ## 已知局限
 
 - 只到表级，不到字段级。

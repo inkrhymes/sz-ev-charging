@@ -82,6 +82,9 @@ python3 scripts/smoke_live.py                          # 线上冒烟检查（8 
 | 工单 | ![tickets](docs/screenshots/tickets.png) |
 | 工单（管理员，1280 宽） | ![tickets_admin_1280](docs/screenshots/tickets_admin_1280.png) |
 | 工单时间线（WO-0007 派单后等了 27 分钟才开始处理，处理用了 2 小时 45 分钟） | ![ticket_timeline](docs/screenshots/ticket_timeline.png) |
+| 数据血缘（六列分层，点节点标亮上下游） | ![lineage](docs/screenshots/lineage.png) |
+
+实时页回放录屏（2022-09-02，288 倍速，3 分钟）：[docs/media/realtime_replay.mp4](docs/media/realtime_replay.mp4)
 
 ## 5. 相关文档
 
