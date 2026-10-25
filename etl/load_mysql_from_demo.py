@@ -31,12 +31,15 @@ def conn():
 def load_csv(cur, table: str, path: Path, cols: list[str]):
     if not path.exists():
         raise FileNotFoundError(path)
-    # safest portable path: INSERT in batches
     with path.open(encoding="utf-8") as f:
         r = csv.DictReader(f)
         rows = []
         for row in r:
-            rows.append([row.get(c) if row.get(c) not in ("", None) else None for c in cols])
+            vals = []
+            for c in cols:
+                v = row.get(c)
+                vals.append(None if v in ("", None) else v)
+            rows.append(vals)
             if len(rows) >= 2000:
                 cur.executemany(
                     f"INSERT INTO {table} ({','.join(cols)}) VALUES ({','.join(['%s']*len(cols))})",
@@ -118,7 +121,6 @@ def main():
             "busy",
             "idle",
             "total_piles",
-            "occupancy",
             "s_price",
             "e_price",
             "duration",
@@ -126,6 +128,7 @@ def main():
             "is_row_missing",
             "is_stuck",
             "is_outlier",
+            "occupancy",
             "quality_flag",
         ],
     )
