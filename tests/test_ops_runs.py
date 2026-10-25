@@ -25,8 +25,9 @@ def test_run_chain_records_every_task(recorded, monkeypatch):
     tasks, calls = recorded
     monkeypatch.setattr(tasks, "CHAIN", [(n, lambda ds, **kw: None) for n, _ in tasks.CHAIN])
     res = tasks.run_chain("2022-09-01", write_db=True)
-    assert [r[1] for r in res] == ["success"] * 7
-    assert [(c[0], c[1], c[2]) for c in calls] == [(n, "2022-09-01", "success") for n, _ in tasks.CHAIN]
+    assert [r[1] for r in res] == ["success"] * 8 and res[-1][0] == "cache_flush"
+    assert [(c[0], c[1], c[2]) for c in calls] == [(n, "2022-09-01", "success") for n, _ in tasks.CHAIN] + [
+        ("cache_flush", "2022-09-01", "success")]
     assert all(c[6] == "run_day" for c in calls)
 
 

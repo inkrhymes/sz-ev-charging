@@ -2,6 +2,7 @@
 
 ods_ingest -> dq_ods -> dwd_build -> dq_dwd -> ads_build -> dq_ads -> publish
 publish -> forecast_daily -> forecast_evaluate；publish -> weather_join；publish -> site_suggest
+以上都结束后 -> cache_flush（清 Redis 读缓存 szev:*，未配置 REDIS_URL 时什么都不做）
 扩展任务退出码：0 成功，2 跳过（AirflowSkipException），3 重试（retries=2），其他直接失败不重试。
 任务本身只调用 orchestration/tasks.py 里的薄包装，具体逻辑在各负责人的脚本中。
 """
@@ -88,5 +89,13 @@ with DAG(
     f_eval = extra("forecast_evaluate", ex["forecast_evaluate"], trigger_rule="none_failed")
     publish >> f_daily >> f_eval
     publish >> f_eval
-    publish >> extra("weather_join", ex["weather_join"])
-    publish >> extra("site_suggest", ex["site_suggest"])
+    w_join = extra("weather_join", ex["weather_join"])
+    s_sugg = extra("site_suggest", ex["site_suggest"])
+    publish >> w_join
+    publish >> s_sugg
+    # 最后清 API 的 Redis 读缓存：publish 成功即可，扩展任务跳过/失败也照样清
+    flush = PythonOperator(task_id="cache_flush", python_callable=tasks.recorded("cache_flush", tasks.cache_flush, "airflow"),
+                           op_kwargs={"ds": "{{ ds }}"}, retries=0, trigger_rule="all_done")
+    publish >> flush
+    for t in (f_eval, w_join, s_sugg):
+        t >> flush

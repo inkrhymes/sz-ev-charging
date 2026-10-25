@@ -181,6 +181,28 @@ def _optional_script(path: Path, name: str):
 weather_join = _optional_script(WEATHER_JOIN, "weather_join")
 site_suggest = _optional_script(SITE_SUGGEST, "site_suggest")
 
+def cache_flush(ds: str) -> None:
+    """链路最后一步：清掉 API 的 Redis 读缓存（键 szev:*），让新数据立即可见。
+    REDIS_URL 没设、redis 包没装或连不上时什么都不做，视为成功。"""
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url:
+        print("[cache_flush] 未设置 REDIS_URL，跳过")
+        return
+    try:
+        import redis
+        r = redis.Redis.from_url(url, socket_connect_timeout=2, socket_timeout=5)
+        n, batch = 0, []
+        for k in r.scan_iter(match="szev:*", count=500):
+            batch.append(k)
+            if len(batch) >= 500:
+                n += r.delete(*batch); batch = []
+        if batch:
+            n += r.delete(*batch)
+        print(f"[cache_flush] 删除缓存键 {n} 个")
+    except Exception as e:  # noqa: BLE001  缓存不可用不影响链路
+        print(f"[cache_flush] Redis 不可用（{type(e).__name__}: {e}），跳过")
+
+
 # publish 成功后执行；彼此独立，一个失败/跳过不影响其他
 AFTER_PUBLISH = [
     ("forecast_daily", forecast_daily),
@@ -253,4 +275,8 @@ def run_chain(ds: str, write_db: bool = True, source: str = "run_day") -> list[t
         except Exception as e:  # 扩展任务失败只记 failed，不影响同一天其他扩展任务
             print(f"[fail] {name}: {e}", flush=True)
             timings.append((name, "failed", time.perf_counter() - t0))
+    # 收尾：不管前面结果如何都清一次缓存（同 DAG trigger_rule=all_done；清缓存无副作用）
+    t0 = time.perf_counter()
+    recorded("cache_flush", cache_flush, source)(ds, write_db=write_db)
+    timings.append(("cache_flush", "success", time.perf_counter() - t0))
     return timings
