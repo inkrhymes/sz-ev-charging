@@ -44,6 +44,7 @@ NEAR_M = 2000
 BUSY_OCC = 0.8     # an hour counts as busy when occupancy >= 80%
 TARGET_OCC = 0.7   # suggest_add_piles brings evening P90 occupancy down to 70%
 ADD_GAP, ADD_P90, WATCH_GAP = 75, 0.6, 60
+MIN_PILES = 4      # zones with fewer piles: never add, always 先观察
 OUT_COLS = ["run_dt", "taz_id", "center_lon", "center_lat", "station_cnt", "piles", "rated_kw", "avg_occupancy",
             "peak_occupancy", "busy_hours_ratio", "demand_score", "supply_score", "gap_score", "suggest_add_piles",
             "rank", "function_tag", "reason"]
@@ -149,22 +150,38 @@ def site_suggest(raw: Path, lake: Path, run_dt: str | None = None) -> pd.DataFra
     z = z.merge(fl[["taz_id", "center_lon", "center_lat"]], on="taz_id", how="left")
     z["rated_power_kw"] = z.rated_power_kw.where(z.rated_power_kw > 0)  # 0 = power unknown
     z["busy_hours_ratio"] = zh.assign(b=zh.occupancy >= BUSY_OCC).groupby("taz_id").b.mean().reindex(z.taz_id).to_numpy()
+    # empirical-Bayes shrinkage (beta-binomial, method of moments), weight = piles n:
+    #   m = pile-weighted city mean, s2 = pile-weighted variance across zones,
+    #   tau2 = s2 - mean(m(1-m)/n)  (between-zone variance after removing binomial noise),
+    #   K = m(1-m)/tau2 - 1  (prior strength in "piles"; fallback = city-median piles if tau2 <= 0),
+    #   x_shr = (n*x + K*m) / (n + K)
+    z.attrs["shrink_k"] = {}
+    for c in ("occ_avg", "occ_evening_p90", "peak_hour_occ"):
+        n = z.pile_cnt.astype(float); m = float(np.average(z[c], weights=n))
+        tau2 = float(np.average((z[c] - m) ** 2, weights=n)) - float(np.mean(m * (1 - m) / n))
+        k = m * (1 - m) / tau2 - 1 if tau2 > 0 else float(n.median())
+        k = max(k, 0.0); z.attrs["shrink_k"][c] = (round(k, 1), round(m, 4))
+        z[c + "_shr"] = (n * z[c] + k * m) / (n + k)
+    small = z.pile_cnt < MIN_PILES
     pct = lambda s: s.rank(pct=True) * 100
     # transparent scores (0-100): demand high = busy, supply high = many piles nearby, gap = need
-    z["demand_score"] = (0.6 * pct(z.occ_evening_p90) + 0.4 * pct(z.occ_avg)).round(1)
+    z["demand_score"] = (0.6 * pct(z.occ_evening_p90_shr) + 0.4 * pct(z.occ_avg_shr)).round(1)
     z["supply_score"] = pct(z.piles_within_2km).round(1)
     z["gap_score"] = (0.7 * z.demand_score + 0.3 * (100 - z.supply_score)).round(1)
     # piles needed so evening P90 occupancy falls to TARGET_OCC (only when the gap is large)
-    need = np.ceil(z.pile_cnt * z.occ_evening_p90 / TARGET_OCC - z.pile_cnt).clip(lower=0)
-    add = (z.gap_score >= ADD_GAP) & (z.occ_evening_p90 >= ADD_P90)
+    need = np.ceil(z.pile_cnt * z.occ_evening_p90_shr / TARGET_OCC - z.pile_cnt).clip(lower=0)
+    add = (z.gap_score >= ADD_GAP) & (z.occ_evening_p90_shr >= ADD_P90) & ~small
     z["suggest_add_piles"] = np.where(add, np.maximum(need, 1), 0).astype("int32")
     why = []
     for r in z.itertuples():
         base = (f"晚高峰（18–23 点）忙的时候占用率到 {r.occ_evening_p90:.0%}，全天平均 {r.occ_avg:.0%}，"
                 f"{r.busy_hours_ratio:.0%} 的小时占用率超过 {BUSY_OCC:.0%}；区内 {r.pile_cnt} 根桩，周边 2 公里平均 {r.piles_within_2km:.0f} 根")
-        if r.suggest_add_piles > 0:
+        base += f"（按桩数校正后晚高峰约 {r.occ_evening_p90_shr:.0%}）"
+        if r.pile_cnt < MIN_PILES:
+            why.append(base + f"。桩数太少，样本不够（少于 {MIN_PILES} 根），先观察。")
+        elif r.suggest_add_piles > 0:
             why.append(base + f"。晚上经常排满、周边桩也不多，建议加 {r.suggest_add_piles} 根桩（加完后晚高峰占用率约降到 {TARGET_OCC:.0%}）。")
-        elif r.gap_score >= WATCH_GAP or r.occ_evening_p90 >= ADD_P90:
+        elif r.gap_score >= WATCH_GAP or r.occ_evening_p90_shr >= ADD_P90:
             why.append(base + "。有时比较紧张，先观察，看后面几个月会不会更忙。")
         else:
             why.append(base + "。桩够用，维持现状。")
@@ -192,4 +209,4 @@ if __name__ == "__main__":
         print(len(z), z.function_label.value_counts().to_dict(), z.district.value_counts().to_dict(), z.density_level.value_counts().to_dict())
     else:
         z = site_suggest(a.raw, LAKE, a.run_dt)
-        print(len(z), (z.suggest_add_piles > 0).sum(), z.suggest_add_piles.sum(), z.gap_score.describe().round(1).to_dict())
+        print(z.attrs.get("shrink_k")); print(len(z), (z.suggest_add_piles > 0).sum(), z.suggest_add_piles.sum(), z.gap_score.describe().round(1).to_dict())

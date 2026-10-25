@@ -103,5 +103,33 @@ def test_add_piles_count(env, tmp_path):
     z = zp.site_suggest(raw, lake, "x").set_index("taz_id")
     # zone1 supply 0 within 2 km except itself: pile counts 10,6 / 4 -> supply ranks; gap high
     assert z.loc[1, "gap_score"] >= 75
-    assert z.loc[1, "suggest_add_piles"] == int(np.ceil(16 * 0.98 / 0.7 - 16))  # 7
-    assert "建议加 7 根桩" in z.loc[1, "reason"]
+    # beta-binomial MoM by hand: m = 0.804, K = m(1-m)/tau2 - 1
+    m = (16 * .98 + 4 * .1) / 20
+    tau2 = (16 * (.98 - m) ** 2 + 4 * (.1 - m) ** 2) / 20 - (m * (1 - m) / 16 + m * (1 - m) / 4) / 2
+    k = m * (1 - m) / tau2 - 1
+    p90 = (16 * 0.98 + k * m) / (16 + k)
+    assert z.loc[1, "suggest_add_piles"] == int(np.ceil(16 * p90 / 0.7 - 16))
+    assert f"建议加 {z.loc[1, 'suggest_add_piles']} 根桩" in z.loc[1, "reason"]
+    assert z.loc[1, "avg_occupancy"] == 0.98  # output keeps the observed value
+
+
+def test_small_zone_watch_only(env, tmp_path):
+    supp, lake = env
+    zp.function_labels(supp, lake)
+    raw = tmp_path / "raw"; raw.mkdir(); ids = [11, 12, 21]
+    pd.DataFrame(30000, index=pd.Index(ids, name="ID"), columns=ids).to_csv(raw / "station_distance.csv")
+    ts = pd.date_range("2022-09-01", periods=48, freq="h")
+    rows = [(t, x, (1.0 if t == 2 else 0.3), x.hour) for t in (1, 2) for x in ts]   # 4-pile zone 2 always full
+    (lake / "dwd/zone_price_hour").mkdir(parents=True)
+    pd.DataFrame(rows, columns=["taz_id", "ts", "occupancy", "hour"]).to_parquet(lake / "dwd/zone_price_hour/part-0.parquet")
+    si = pd.read_parquet(lake / "ods/station_info/part-0.parquet"); si.loc[si.taz_id == 2, "charge_count"] = 3
+    si.to_parquet(lake / "ods/station_info/part-0.parquet")
+    z = zp.site_suggest(raw, lake, "x").set_index("taz_id")
+    assert z.loc[2, "suggest_add_piles"] == 0
+    assert "桩数太少，样本不够" in z.loc[2, "reason"] and "先观察" in z.loc[2, "reason"]
+
+
+def test_shrinkage_pulls_small_zone_to_mean():
+    # direct check of the formula: n=2 piles at 100% with K=10, m=0.3 -> (2*1 + 10*.3)/12
+    n, x, k, m = 2, 1.0, 10.0, 0.3
+    assert (n * x + k * m) / (n + k) == pytest.approx(5 / 12)
