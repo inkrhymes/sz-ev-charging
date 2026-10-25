@@ -17,8 +17,10 @@ Steps
   3 report: per-station quality summary + docs/quality_report_full.md,
             metrics appended to docs/full_load_metrics.md.
 
-Peak memory ~= batch_days * n_stations * 288 rows (7 days, 1682 stations
-~= 3.4M rows ~= 0.6 GB) plus workers * one station file.
+Staging is written per station-group and per day (stg/dt=X/gNNN.parquet), so
+the split step reads ~34 small files per dt in parallel. Peak memory ~= workers *
+group_size station files (4 * 20 * 52k rows); measured peak ~2.2 GB total.
+(old note: ~= 3.4M rows ~= 0.6 GB) plus workers * one station file.
 """
 from __future__ import annotations
 
@@ -35,6 +37,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = Path("/workspace/thesis_ev_data/gdrive/UrbanEV/UrbanEVDataset/20220901-20230228_station-raw")
 LAKE = Path(os.environ.get("SZ_EV_LAKE", ROOT / "data" / "lake"))  # override to share one lake across clones
 HIGH_MISSING_THR = 0.30
+REPAIR_STUCK_DAYS = 30      # cumulative stuck days -> repair ticket
+WARN_STUCK_STATIONS = 221   # daily warning: stuck stations > p95 of 181 days
+WARN_NEW_STUCK = 63         # daily warning: newly stuck stations > p95
 LOOKBACK_DAYS = 7  # stuck / IQR-outlier window: the day plus 6 previous days
 RAW_COLS = ["busy", "idle", "s_price", "e_price", "fast_busy", "fast_idle",
             "slow_busy", "slow_idle", "duration", "volume"]
@@ -100,11 +105,42 @@ def _stage_one(args):
     m = miss.to_numpy().astype(int); run = best = 0
     for v in m:
         run = run + 1 if v else 0; best = max(best, run)
-    df.to_parquet(out / f"{sid}.parquet", index=False)
     stat = dict(station_id=sid, taz_id=taz, rows=len(df), missing_rows=int(m.sum()),
                 missing_rate=round(float(m.mean()), 6), stuck_flag=stuck, stuck_days=stuck_days,
-                outlier_rows=int(out_mask.sum()), gap_days_max=int(round(best*5/1440)))
-    return sid, len(df), stat
+                outlier_rows=int(out_mask.sum()), gap_days_max=int(round(best*5/1440)),
+                stuck_dates=[d.strftime("%Y-%m-%d") for d, v in stuck_day.items() if v])
+    return sid, df, stat
+
+
+def _stage_group(args):
+    """Process a group of stations; write staging split by day: stg/dt=X/g<k>.parquet.
+    Lets the split step read only ~n_groups small files per dt instead of every station file."""
+    k, jobs, out = args
+    frames, stats = [], []
+    for j in jobs:
+        sid, df, st = _stage_one(j)
+        if st: frames.append(df); stats.append(st)
+    if not frames:
+        return 0, stats
+    df = pd.concat(frames, ignore_index=True); del frames
+    df["ts"] = df["ts"].astype("datetime64[us]")
+    for dt, g in df.groupby(df.ts.dt.strftime("%Y-%m-%d")):
+        d = out / f"dt={dt}"; d.mkdir(exist_ok=True)
+        g.to_parquet(d / f"g{k:03d}.parquet", index=False)
+    return len(df), stats
+
+
+def _split_day(args):
+    dt, stg, ods_root, dwd_root, layer = args
+    g = pq.read_table(stg / f"dt={dt}").to_pandas()
+    g = g.sort_values(["station_id", "ts"], kind="stable")
+    for root, sch in [x for x in ((ods_root, ODS_SCHEMA), (dwd_root, DWD_SCHEMA)) if layer == "all" or x[0].parent.name == layer]:
+        pdir = root / f"dt={dt}"; tmp = root / f".tmp_dt={dt}"
+        shutil.rmtree(tmp, ignore_errors=True); tmp.mkdir(parents=True)
+        tbl = pa.Table.from_pandas(g[sch.names], schema=sch, preserve_index=False)
+        pq.write_table(tbl, tmp / "part-0.parquet", compression="snappy")
+        shutil.rmtree(pdir, ignore_errors=True); tmp.rename(pdir)
+    return dt, len(g)
 
 
 def dir_size(p: Path) -> int:
@@ -117,7 +153,8 @@ def main():
     ap.add_argument("--end", default="2023-02-28", help="inclusive date")
     ap.add_argument("--stations", default="all", help="'all' or comma list or N (first N)")
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--batch-days", type=int, default=7)
+    ap.add_argument("--batch-days", type=int, default=7, help="(unused since v3; kept for CLI compat)")
+    ap.add_argument("--group-size", type=int, default=20, help="stations per staging task (memory ~ group_size * 52k rows per worker)")
     ap.add_argument("--layer", choices=["ods", "dwd", "all"], default="all", help="which partitions to (re)write")
     ap.add_argument("--write-report", action="store_true", help="also rewrite docs/full_load_metrics.md and docs/quality_report_full.md")
     ap.add_argument("--keep-staging", action="store_true")
@@ -142,37 +179,21 @@ def main():
 
     t = time.time()
     jobs = [(str(f), start, end, piles.get(int(f.stem)), taz.get(int(f.stem)), stg) for f in files]
+    gs = max(1, a.group_size)
+    groups = [(k, jobs[i:i+gs], stg) for k, i in enumerate(range(0, len(jobs), gs))]
     stats = []; rows = 0
     with ProcessPoolExecutor(a.workers) as ex:
-        for sid, n, st in ex.map(_stage_one, jobs, chunksize=8):
-            rows += n
-            if st: stats.append(st)
+        for n, sts in ex.map(_stage_group, groups):
+            rows += n; stats += sts
     m["stage"] = dict(rows=rows, secs=time.time()-t, bytes=dir_size(stg), files=len(files), src_bytes=src_bytes)
     print("stage", m["stage"], flush=True)
 
     t = time.time(); ods_rows = dwd_rows = 0; parts = 0
     ods_root = LAKE / "ods" / "charge_5min"; dwd_root = LAKE / "dwd" / "charge_5min_clean"
-    stg_files = sorted(stg.glob("*.parquet"))
-    d = start
-    while d < end:
-        w_end = min(d + pd.Timedelta(days=a.batch_days), end)
-        flt = [("ts", ">=", d.to_pydatetime()), ("ts", "<", w_end.to_pydatetime())]
-        tables = [pq.read_table(f, filters=flt) for f in stg_files]
-        df = pa.concat_tables(tables, promote_options="default").to_pandas()
-        df["dt"] = df.ts.dt.strftime("%Y-%m-%d")
-        for dt, g in df.groupby("dt"):
-            g = g.sort_values(["station_id", "ts"])
-            g = g.assign(ts=g.ts.astype("datetime64[us]"))
-            for root, sch in [x for x in ((ods_root, ODS_SCHEMA), (dwd_root, DWD_SCHEMA)) if a.layer == "all" or x[0].parent.name == a.layer]:
-                pdir = root / f"dt={dt}"; tmp = root / f".tmp_dt={dt}"
-                shutil.rmtree(tmp, ignore_errors=True); tmp.mkdir(parents=True)
-                tbl = pa.Table.from_pandas(g[sch.names], schema=sch, preserve_index=False)
-                pq.write_table(tbl, tmp / "part-0.parquet", compression="snappy")
-                shutil.rmtree(pdir, ignore_errors=True); tmp.rename(pdir)
-            ods_rows += len(g); dwd_rows += len(g); parts += 1
-        del df, tables
-        print("split window", d.date(), "->", w_end.date(), flush=True)
-        d = w_end
+    dts = sorted(p.name[3:] for p in stg.glob("dt=*"))
+    with ProcessPoolExecutor(a.workers) as ex:
+        for dt, n in ex.map(_split_day, [(dt, stg, ods_root, dwd_root, a.layer) for dt in dts]):
+            ods_rows += n; dwd_rows += n; parts += 1
     if ods_rows != rows:
         raise SystemExit(f"row mismatch: staged {rows} vs written {ods_rows}")
     m["split"] = dict(ods_rows=ods_rows, dwd_rows=dwd_rows, partitions=parts, secs=time.time()-t,
@@ -181,10 +202,10 @@ def main():
 
     t = time.time()
     q = pd.DataFrame(stats).sort_values("station_id")
-    q["ticket_suggest"] = np.where(q.stuck_flag == 1, "repair",
+    q["ticket_suggest"] = np.where(q.stuck_days >= REPAIR_STUCK_DAYS, "repair",
                                    np.where(q.missing_rate > HIGH_MISSING_THR, "inspect", "none"))
     qdir = LAKE / "dwd" / "quality_station" / f"run={tag}"; qdir.mkdir(parents=True, exist_ok=True)
-    q.to_parquet(qdir / "part-0.parquet", index=False)
+    q.drop(columns="stuck_dates").to_parquet(qdir / "part-0.parquet", index=False)
     if a.write_report:
         write_quality(q, a, tag)
     m["report"] = dict(secs=time.time()-t)
@@ -201,26 +222,53 @@ def main():
         write_metrics(m, a, tag)
 
 
+def daily_stuck(q):
+    days = {}
+    for sid, ds in zip(q.station_id, q.stuck_dates):
+        for d in ds: days.setdefault(d, set()).add(sid)
+    alld = sorted(days); rows = []; prev = set()
+    for d in pd.date_range(min(alld), max(alld)).strftime("%Y-%m-%d") if alld else []:
+        cur = days.get(d, set())
+        rows.append(dict(dt=d, stuck=len(cur), new_stuck=len(cur - prev))); prev = cur
+    return pd.DataFrame(rows, columns=["dt", "stuck", "new_stuck"])
+
+
 def write_quality(q, a, tag):
     tot = q.rows.sum(); miss = q.missing_rows.sum()
-    tazs = q.taz_id.nunique()
+    dd = daily_stuck(q)
+    warn = dd[(dd.stuck > WARN_STUCK_STATIONS) | (dd.new_stuck > WARN_NEW_STUCK)]
+    sd = q.stuck_days
     lines = [f"# 全量数据质检报告（{a.start} ~ {a.end}）", "",
-             "由 `etl/full_pipeline.py` 生成，规则与演示子集一致（`etl/clean_to_dwd.py`）：整行缺失 = busy 与 idle 均为空；"
-             "卡死 = 某天及其前 6 天（共 7 天）的有效 busy 只有一个取值（≥12 点），按站按天标记；异常 = busy 超出该站同一 7 天窗口的 IQR 1.5 倍边界；"
-             f"缺失率 > {HIGH_MISSING_THR:.0%} 建议巡检，卡死建议维修。", "",
+             "由 `etl/full_pipeline.py --write-report` 生成。规则：",
+             "- 整行缺失：busy 与 idle 均为空。",
+             "- 卡死：某站某天连同前 6 天（共 7 天）的有效 busy 只有一个取值（≥12 点），按站按天标记，与运行区间无关。",
+             "- 异常：busy 超出该站同一 7 天窗口的 IQR 1.5 倍边界。",
+             f"- 单日卡死只做**预警**，不开工单：当天卡死站数 > {WARN_STUCK_STATIONS} 或新增卡死站数 > {WARN_NEW_STUCK}（两个阈值取 181 天的 P95）。",
+             f"- 累计卡死 ≥ {REPAIR_STUCK_DAYS} 天：建议**维修**工单；缺失率 > {HIGH_MISSING_THR:.0%}（且未到维修）：建议**巡检**。", "",
              "| 指标 | 数值 |", "|---|---|",
-             f"| 站点数 | {len(q)} |", f"| 片区数（TAZ） | {tazs} |",
+             f"| 站点数 | {len(q)} |", f"| 片区数（TAZ） | {q.taz_id.nunique()} |",
              f"| 总行数 | {tot:,} |", f"| 缺失行数 | {miss:,} |",
              f"| 整体缺失率 | {miss/tot:.2%} |",
              f"| 异常点行数 | {q.outlier_rows.sum():,} ({q.outlier_rows.sum()/tot:.2%}) |",
-             f"| 卡死站点（至少一天卡死） | {int(q.stuck_flag.sum())} |", f"| 卡死站·天 | {int(q.stuck_days.sum())} |",
+             f"| 至少一天卡死的站点 | {int((sd >= 1).sum())} |", f"| 卡死站·天 | {int(sd.sum()):,} |",
+             f"| 触发单日预警的天数 | {len(warn)} / {len(dd)} |",
              f"| 高缺失站点（>{HIGH_MISSING_THR:.0%}） | {int((q.missing_rate>HIGH_MISSING_THR).sum())} |",
              f"| 全部缺失的站点 | {int((q.missing_rate>=1).sum())} |",
              f"| 建议工单：维修 / 巡检 | {int((q.ticket_suggest=='repair').sum())} / {int((q.ticket_suggest=='inspect').sum())} |",
-             "", "## 缺失率最高的 15 个站点", "",
-             "| station_id | taz_id | missing_rate | stuck | gap_days_max | ticket |", "|---|---|---|---|---|---|"]
+             "", "## 累计卡死天数分布", "", "| 累计卡死天数 | 站点数 |", "|---|---|"]
+    for k in (1, 7, 30, 90):
+        lines.append(f"| ≥ {k} | {int((sd >= k).sum())} |")
+    lines.append(f"| = {len(dd) or 181}（全程） | {int((sd >= (len(dd) or 181)).sum())} |")
+    if len(dd):
+        lines += ["", "## 每日卡死站数", "",
+                  f"P50 / P95 / 最大：当天卡死 {dd.stuck.quantile(.5):.0f} / {dd.stuck.quantile(.95):.0f} / {dd.stuck.max()}；"
+                  f"新增 {dd.new_stuck.quantile(.5):.0f} / {dd.new_stuck.quantile(.95):.0f} / {dd.new_stuck.max()}。"]
+        if len(warn):
+            lines += ["", "触发预警的日期：" + "、".join(f"{r.dt}（{r.stuck}/{r.new_stuck}）" for r in warn.itertuples()) + "（括号内为 当天卡死/新增）。"]
+    lines += ["", "## 缺失率最高的 15 个站点", "",
+              "| station_id | taz_id | missing_rate | stuck_days | gap_days_max | ticket |", "|---|---|---|---|---|---|"]
     for r in q.sort_values("missing_rate", ascending=False).head(15).itertuples():
-        lines.append(f"| {r.station_id} | {r.taz_id} | {r.missing_rate:.2%} | {r.stuck_flag} | {r.gap_days_max} | {r.ticket_suggest} |")
+        lines.append(f"| {r.station_id} | {r.taz_id} | {r.missing_rate:.2%} | {r.stuck_days} | {r.gap_days_max} | {r.ticket_suggest} |")
     lines += ["", f"站点明细：`data/lake/dwd/quality_station/run={tag}/part-0.parquet`（不入库）。", ""]
     (ROOT / "docs" / "quality_report_full.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -231,7 +279,7 @@ def write_metrics(m, a, tag):
     if not p.exists():
         p.write_text("# 全量装载记录\n\n每次运行 `etl/full_pipeline.py` 追加一节。耗时为墙钟时间，机器 8 核 / 15 GB（与其他服务共用）。\n", encoding="utf-8")
     s, sp = m["stage"], m["split"]
-    sec = [f"\n## {tag}（stations={a.stations}, workers={a.workers}, batch_days={a.batch_days}，"
+    sec = [f"\n## {tag}（stations={a.stations}, workers={a.workers}, group_size={a.group_size}，"
            f"{_dt.datetime.now():%Y-%m-%d %H:%M} UTC+8）", "",
            "| 步骤 | 行数 | 存储 | 耗时 |", "|---|---|---|---|",
            f"| 源 CSV 读取+清洗规则（{s['files']} 个站文件，{mb(s['src_bytes'])}） | {s['rows']:,} | 中间件 {mb(s['bytes'])} | {s['secs']:.1f} s |",
