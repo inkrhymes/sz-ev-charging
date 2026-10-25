@@ -265,13 +265,15 @@
         <div class="card col-6 kpi"><div class="kpi-label">预测值平均误差<span class="tip" data-tip="模型预测和实际占用率平均差多少，只算测试时段"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="kpi-val" id="fcMae">-</div><div class="kpi-foot" id="fcMaeFoot"></div></div>
         <div class="card col-6 kpi"><div class="kpi-label">上一小时参考值平均误差</div><div class="kpi-val" id="fcMaeLag">-</div><div class="kpi-foot">同一测试时段</div></div>
         <div class="card col-6 kpi"><div class="kpi-label">预测值均方根误差</div><div class="kpi-val" id="fcRmse">-</div><div class="kpi-foot" id="fcRmseFoot"></div></div>
-        <div class="card col-6 kpi"><div class="kpi-label">测试时段</div><div class="kpi-val" id="fcSplit" style="font-size:18px">-</div><div class="kpi-foot">误差按 2 月 1–28 日共 28 天算，图里只画 2 月 27–28 日</div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">测试时段</div><div class="kpi-val" id="fcSplit" style="font-size:18px">-</div><div class="kpi-foot">误差按测试时段内每个小时一起算</div></div>
       </div>
       <div class="grid">
         <div class="card col-24"><div class="card-head"><div class="card-title">实际占用 vs 上一小时参考<span class="tip" data-tip="拿上一小时的实际占用，当作这一小时的参考值，方便看出突然变高或变低"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
           <div class="card-body"><div id="chartBaseline" class="chart-main"></div></div></div>
         <div class="card col-24"><div class="card-head"><div class="card-title">逐小时绝对误差</div></div>
           <div class="card-body"><div id="chartErr" class="chart-sub"></div></div></div>
+        <div class="card col-24" id="fcDailyCard" style="display:none"><div class="card-head"><div class="card-title">每天的预测误差（提前一天预测）<span class="tip" data-tip="每天用前一天为止的数据，预测第二天每小时的占用率，再和实际比；全市所有片区一起算"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="fcDailyExtra"></div></div>
+          <div class="card-body"><div id="chartFcDaily" class="chart-sub"></div></div></div>
       </div>
     </section>
 
@@ -279,7 +281,7 @@
     <section class="view" id="view-runs">
       <div class="card"><div class="card-head"><div class="card-title">运行记录</div><span class="readonly-note" id="runsExtra"></span></div>
         <div class="card-body">
-          <table><thead><tr><th>数据日期</th><th>开始时间</th><th>用时</th><th>结果</th><th>各步骤</th></tr></thead><tbody id="runsBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody></table>
+          <table><thead><tr><th>数据日期</th><th>开始时间</th><th>用时</th><th>结果</th><th>各步骤</th></tr></thead><tbody id="runsBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody></table><div class="pager" id="runsPager"></div>
         </div></div>
     </section>
     <section class="view" id="view-site">
@@ -455,7 +457,7 @@
     });
     const $ = id => document.getElementById(id);
     const charts = {};
-    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
+    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite", "chartFcDaily"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
     const resizeAll = () => Object.values(charts).forEach(c => c.resize());
     const pct = v => (v * 100).toFixed(0) + "%";
     const tsLabel = ts => ts.slice(5, 16);   // MM-DD HH:mm
@@ -532,6 +534,13 @@
       renderSeriesTable();
     }
 
+    // 坐标轴两头留一点空，大圆点不会被裁掉
+    function padRange(vs) {
+      vs = vs.filter(v => Number.isFinite(v));
+      if (!vs.length) return { scale: true };
+      const lo = Math.min(...vs), hi = Math.max(...vs), pad = Math.max((hi - lo) * 0.04, 0.01);
+      return { min: +(lo - pad).toFixed(3), max: +(hi + pad).toFixed(3) };
+    }
     function pager(el, total, page, size, onGo) {
       const pages = Math.max(1, Math.ceil(total / size));
       let html = `<span>共 ${total} 条</span><span class="pg ${page <= 1 ? "dis" : ""}" data-p="${page - 1}">&lt;</span>`;
@@ -620,11 +629,29 @@
       } catch (e) { toast("预测数据暂时取不到"); return; }
       renderBaseline(d);
     }
+    async function loadFcDaily() {
+      $("fcDailyCard").style.display = "";
+      let pts = [];
+      try { const d = await apiGet("/api/forecast/metrics"); pts = (d && (d.points || d.items)) || (Array.isArray(d) ? d : []); } catch (e) { pts = []; }
+      const pct = v => v == null ? null : +(v * 100).toFixed(2);
+      const avg = k => { const v = pts.map(p => p[k]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+      $("fcDailyExtra").textContent = pts.length ? `共 ${pts.length} 天，平均误差：模型 ${pct(avg("mae_lgbm"))}%，前一天同一小时 ${pct(avg("mae_lag24"))}%，最后一次实测 ${pct(avg("mae_lag1"))}%` : "";
+      charts.chartFcDaily.resize();
+      charts.chartFcDaily.setOption({
+        tooltip: { trigger: "axis", valueFormatter: v => v == null ? "—" : v + "%" },
+        legend: { top: 0 }, grid: { left: 48, right: 24, top: 36, bottom: 32 },
+        xAxis: { type: "category", data: pts.map(p => String(p.ds).slice(5, 10)) },
+        yAxis: { type: "value", axisLabel: { formatter: "{value}%" } },
+        series: [["模型预测", "mae_lgbm", "#722ED1"], ["前一天同一小时", "mae_lag24", "#14C9C9"], ["最后一次实测", "mae_lag1", "#86909C"]].map(([n, k, c]) =>
+          ({ name: n, type: "line", smooth: true, symbolSize: 5, itemStyle: { color: c }, data: pts.map(p => pct(p[k])) })),
+        graphic: pts.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: "还没有每天的预测误差，预测任务跑过之后会显示", fill: "#86909C", fontSize: 14 } }],
+      }, true);
+    }
     $("btnFc").onclick = async () => {
       fcMode = !fcMode;
       $("btnFc").textContent = fcMode ? "回到所选日期" : "看预测对比";
       $("btnFc").classList.toggle("primary", fcMode);
-      if (fcMode) await loadForecastView(); else if (lastBaseline) renderBaseline(lastBaseline, true);
+      if (fcMode) { await loadForecastView(); loadFcDaily(); } else { $("fcDailyCard").style.display = "none"; if (lastBaseline) renderBaseline(lastBaseline, true); }
     };
     function renderForecastCards(fc) {
       $("fcCards").style.display = fc.has ? "" : "none";
@@ -895,8 +922,8 @@
       charts.chartMap.setOption({
         tooltip: { trigger: "item", formatter: p => { const d = p.data.raw; return `片区 ${d.taz_id}<br>站数 ${d.station_count}，桩数 ${d.total_piles}<br>${mapHourOn ? "这一小时占用率" : "平均占用率"} ${d.avg_occupancy == null ? "暂无数据" : pct(d.avg_occupancy)}`; } },
         grid: { left: 56, right: 24, top: 24, bottom: 40 },
-        xAxis: { type: "value", scale: true, name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { formatter: v => v.toFixed(2) } },
-        yAxis: { type: "value", scale: true, name: "纬度", axisLabel: { formatter: v => v.toFixed(2) } },
+        xAxis: { type: "value", ...padRange(z.map(d => +d.lon)), name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { showMinLabel: false, showMaxLabel: false, formatter: v => v.toFixed(2) } },
+        yAxis: { type: "value", ...padRange(z.map(d => +d.lat)), name: "纬度", axisLabel: { showMinLabel: false, showMaxLabel: false, formatter: v => v.toFixed(2) } },
         series: [{ type: "scatter", data: z.map(d => ({ value: [d.lon, d.lat], raw: d, itemStyle: { color: occColor(d.avg_occupancy), opacity: .85 } })),
           symbolSize: (v, p) => 12 + Math.min(28, Math.sqrt(p.data.raw.total_piles || 1) * 2), label: { show: z.length <= 60, position: "top", formatter: p => p.data.raw.taz_id, color: "#4E5969", fontSize: 11 } },
           { id: "st", type: "scatter", data: [], symbol: "diamond", symbolSize: 9, itemStyle: { color: "#1D2129" }, tooltip: { formatter: p => `站点 ${p.data.raw.station_id}<br>平均占用率 ${p.data.raw.avg_occupancy == null ? "暂无数据" : pct(p.data.raw.avg_occupancy)}` } }],
@@ -1159,8 +1186,8 @@
         tooltip: { trigger: "item", formatter: p => { const r = p.data.raw; return `片区 ${escHtml(r.taz_id)}${r.function_tag ? `（${escHtml(r.function_tag)}）` : ""}<br>${SITE_KIND[r.kind][0]}${r.kind === "add" ? ` ${r.suggest_add_piles} 根` : ""}<br>缺桩程度 ${r.gap_score == null ? "—" : Math.round(r.gap_score)}，现有 ${r.piles ?? "—"} 根桩`; } },
         legend: { data: Object.values(SITE_KIND).map(k => k[0]), top: 0 },
         grid: { left: 56, right: 24, top: 36, bottom: 40 },
-        xAxis: { type: "value", scale: true, name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { formatter: v => v.toFixed(2) } },
-        yAxis: { type: "value", scale: true, name: "纬度", axisLabel: { formatter: v => v.toFixed(2) } },
+        xAxis: { type: "value", ...padRange(pts.map(r => +r.center_lon)), name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { showMinLabel: false, showMaxLabel: false, formatter: v => v.toFixed(2) } },
+        yAxis: { type: "value", ...padRange(pts.map(r => +r.center_lat)), name: "纬度", axisLabel: { showMinLabel: false, showMaxLabel: false, formatter: v => v.toFixed(2) } },
         series: Object.entries(SITE_KIND).map(([k, [cn, , col]]) => ({ name: cn, type: "scatter", itemStyle: { color: col, opacity: .8 },
           symbolSize: (v, p) => 8 + Math.min(22, (p.data.raw.gap_score || 0) / 5),
           data: pts.filter(r => r.kind === k).map(r => ({ value: [r.center_lon, r.center_lat], raw: r })) })),
@@ -1173,9 +1200,10 @@
     const RUNS_API = "/api/ops/runs";
     const openRuns = new Set();
     const RUN_ST = { success: ["成功", "success"], ok: ["成功", "success"], failed: ["失败", "danger"], fail: ["失败", "danger"], error: ["失败", "danger"],
-      running: ["运行中", "blue"], skipped: ["跳过", "gray"], queued: ["排队中", "gray"] };
-    const runTag = s => { const [cn, c] = RUN_ST[String(s || "").toLowerCase()] || [s || "未知", "gray"]; return `<span class="tag ${c}">${escHtml(cn)}</span>`; };
-    let runsLoaded = false;
+      running: ["运行中", "blue"], skipped: ["跳过", "gray"], queued: ["排队中", "gray"],
+      not_recorded: ["没有记录", "gray"], upstream_failed: ["前一步失败", "danger"], blocked: ["被拦下", "warning"], up_for_retry: ["等待重试", "warning"] };
+    const runTag = s => { const [cn, c] = RUN_ST[String(s || "").toLowerCase()] || ["未知", "gray"]; return `<span class="tag ${c}">${escHtml(cn)}</span>`; };
+    let runsLoaded = false, runsPage = 1;
     async function loadRuns() {
       runsLoaded = true;
       const empty = msg => { $("runsBody").innerHTML = `<tr><td colspan="5" class="empty">${msg}</td></tr>`; $("runsExtra").textContent = ""; };
@@ -1185,12 +1213,16 @@
       const rows = Array.isArray(d) ? d : (d && (d.items || d.runs)) || [];
       if (!rows.length) return empty("还没有运行记录，数据处理跑过之后会显示在这里");
       $("runsExtra").textContent = `共 ${rows.length} 次`;
-      $("runsBody").innerHTML = rows.map(r => {
+      const RUN_SIZE = 10, runPages = Math.max(1, Math.ceil(rows.length / RUN_SIZE));
+      if (runsPage > runPages) runsPage = runPages;
+      const pageRows = rows.slice((runsPage - 1) * RUN_SIZE, runsPage * RUN_SIZE);
+      pager($("runsPager"), rows.length, runsPage, RUN_SIZE, p => { runsPage = p; loadRuns(); });
+      $("runsBody").innerHTML = pageRows.map(r => {
         const st = r.started_at || r.start_time || "", en = r.ended_at || r.end_time || "";
         const dur = r.duration_s != null ? r.duration_s * 1000 : (st && en ? toDate(en) - toDate(st) : null);
         const steps = (r.steps || r.tasks || []).map(x => `<span style="margin-right:8px">${escHtml(x.name || x.task || x.task_id || "")} ${runTag(x.status || x.state)}</span>`).join("");
         const ds = String(r.ds || r.dt || "").slice(0, 10);
-        return `<tr><td>${ds ? `<a data-run="${escHtml(ds)}">${escHtml(ds)}</a>` : "—"}</td><td>${escHtml(String(st).slice(0, 16)) || "—"}</td><td>${dur != null ? fmtDur(dur) : "—"}</td><td>${runTag(r.status || r.state)}</td><td>${steps || '<span class="readonly-note">—</span>'}${r.error ? `<div class="readonly-note">${escHtml(r.error)}</div>` : ""}</td></tr>`
+        return `<tr><td style="white-space:nowrap">${ds ? `<a data-run="${escHtml(ds)}">${escHtml(ds)}</a>` : "—"}</td><td style="white-space:nowrap">${escHtml(String(st).slice(0, 16)) || "—"}</td><td style="white-space:nowrap">${dur != null ? fmtDur(dur) : "—"}</td><td>${runTag(r.status || r.state)}</td><td>${steps || '<span class="readonly-note">—</span>'}${r.error ? `<div class="readonly-note">${escHtml(r.error)}</div>` : ""}</td></tr>`
           + (openRuns.has(ds) ? `<tr class="flow-row"><td colspan="5" id="runDay-${escHtml(ds)}"><span class="readonly-note">加载中…</span></td></tr>` : "");
       }).join("");
       $("runsBody").querySelectorAll("a[data-run]").forEach(a => a.onclick = () => { const k = a.dataset.run; openRuns.has(k) ? openRuns.delete(k) : openRuns.add(k); loadRuns(); });

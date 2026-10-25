@@ -163,3 +163,31 @@ def test_ticket_flow_uses_started_at(browser):
     assert "平均等多久开始处理" in stats and "开始处理后平均多久完成" in stats
     assert not probs["js"], probs["js"]
     pg.close()
+
+
+def test_forecast_daily_error_chart(browser):
+    pg, probs = open_page(browser)
+    pg.goto(f"{UI_BASE}#/baseline")
+    pg.wait_for_load_state("networkidle")
+    pg.click("#btnFc")
+    pg.wait_for_timeout(2500)
+    assert pg.locator("#fcDailyCard").is_visible()
+    n = pg.evaluate("echarts.getInstanceByDom(document.getElementById('chartFcDaily')).getOption().xAxis[0].data.length")
+    extra = pg.inner_text("#fcDailyExtra")
+    assert (n > 0 and f"共 {n} 天" in extra) or "还没有" in pg.evaluate("JSON.stringify(echarts.getInstanceByDom(document.getElementById('chartFcDaily')).getOption().graphic)")
+    assert not probs["js"], probs["js"]
+    pg.click("#btnFc")
+    assert not pg.locator("#fcDailyCard").is_visible()
+    pg.close()
+
+
+def test_runs_page_is_paged(browser):
+    pg, probs = open_page(browser)
+    pg.goto(f"{UI_BASE}#/runs")
+    pg.wait_for_load_state("networkidle")
+    pg.wait_for_timeout(1500)
+    assert pg.locator("#runsBody a[data-run]").count() <= 10
+    text = pg.inner_text("#runsBody")
+    assert "not_recorded" not in text and "success" not in text
+    assert not probs["js"], probs["js"]
+    pg.close()
