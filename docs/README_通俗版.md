@@ -6,11 +6,9 @@
 
 ## 这是干什么的？
 
-正式题名：**基于大数据技术的深圳市电动汽车充电站运行管理可视化系统设计与实现**
-
 一句话：用深圳公开充电站数据（UrbanEV），挑 **25 个站、14 天**，走完「取数 → 清洗 → 分层入库 → 算指标 → 做大屏」，方便投简历和面试时讲清楚你做了什么。
 
-技术用 Python + Flask + MySQL + ECharts（写在技术路线里，**不写进题名**）。
+技术用 Python + Flask + MySQL + ECharts。
 
 仓库：https://github.com/inkrhymes/sz-ev-charging
 
