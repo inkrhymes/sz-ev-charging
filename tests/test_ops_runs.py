@@ -145,3 +145,42 @@ def test_runs_db_down_is_503(monkeypatch):
     monkeypatch.setattr(m, "_sql", lambda q, a=(): None)
     c = m.app.test_client()
     assert c.get("/api/ops/runs").status_code == 503
+
+
+# ---------- 健康指标 ----------
+def _dq(ds, layer, run, t, n, npass, bf):
+    return {"ds": dt.date.fromisoformat(ds), "layer": layer, "run_id": run, "checked_at": dt.datetime(2026, 10, 25, 13, t),
+            "n": n, "n_pass": Decimal(npass), "block_fail": Decimal(bf)}
+
+
+def test_health_from_pure():
+    import ops
+    dq = [_dq("2022-10-26", "dwd", "a", 1, 10, 10, 0), _dq("2022-10-27", "dwd", "b", 2, 10, 7, 1),
+          _dq("2022-10-27", "dwd", "c", 3, 10, 9, 0),   # 同一天重跑，取最近一次（已通过）
+          _dq("2022-10-28", "dwd", "d", 4, 10, 8, 1), _dq("2022-10-28", "ods", "e", 4, 5, 5, 0)]
+    build = [{"task_id": "dwd_build", "ds": dt.date(2022, 10, 28), "built_at": dt.datetime(2026, 10, 25, 12, 0)}]
+    alerts = [{"layer": "dwd", "severity": "block", "status": "open", "n": 2},
+              {"layer": "ods", "severity": "warn", "status": "open", "n": 3},
+              {"layer": "dwd", "severity": "warn", "status": "ack", "n": 1}]
+    h = ops.health_from(dq, build, alerts, ROWS, {"publish": {"data_until": dt.datetime(2023, 2, 28, 23)}},
+                        dt.datetime(2026, 10, 25, 14, 30))
+    f = h["freshness"]
+    assert f["dwd"]["latest_ds"] == "2022-10-28" and f["dwd"]["latest_passed_ds"] == "2022-10-27"
+    assert f["dwd"]["built_age_hours"] == 2.5 and f["ads"]["latest_ds"] is None
+    assert f["publish"]["data_until"] == "2023-02-28 23:00:00"
+    d = h["dq_pass_rate"]["dwd"]
+    assert (d["days"], d["days_passed"], d["day_pass_rate"], d["rule_pass_rate"]) == (3, 2, 0.6667, 0.9)
+    assert d["blocked_days"] == ["2022-10-28"] and h["dq_pass_rate"]["ods"]["day_pass_rate"] == 1.0
+    assert h["open_alerts"] == {"open": 5, "ack": 1, "by_layer": {"dwd": 2, "ods": 3}, "by_severity": {"block": 2, "warn": 3}}
+    assert [x["ds"] for x in h["last_runs"]] == ["2022-10-27", "2022-10-26"]
+    assert "ads_build" not in h["last_runs"][0]["steps"]          # skipped 不计耗时
+    assert h["last_runs_duration_s"]["max"] == 21.5 and h["last_runs_duration_s"]["min"] == 14.0
+
+
+def test_health_endpoint_503_and_days(monkeypatch):
+    m = importlib.import_module("app")
+    m.app.config["TESTING"] = True
+    monkeypatch.setattr(m, "_sql", lambda q, a=(): None)
+    c = m.app.test_client()
+    assert c.get("/api/ops/health_metrics").status_code == 503
+    assert c.get("/api/ops/health_metrics?days=x").status_code == 400

@@ -2,9 +2,13 @@
 
   GET /api/ops/runs?from=YYYY-MM-DD&to=YYYY-MM-DD   每天一行的运行概况
   GET /api/ops/runs/<ds>                            某天每个任务的最近一次结果 + 全部尝试
+  GET /api/runs、/api/runs/<ds>                     同上（别名）
+  GET /api/ops/health_metrics?days=30               各层新鲜度、最近 7 次运行耗时、各层质检通过率、未关闭告警数
 app.py 末尾调用 register(app, _sql, ok, err) 挂载。
 """
 from __future__ import annotations
+
+import datetime as dt
 
 import re
 from datetime import date, datetime
@@ -84,6 +88,93 @@ def day_summary(ds: str, rows: list[dict]) -> dict:
     }
 
 
+# ---------- 运行健康指标 /api/ops/health_metrics ----------
+LAYERS = ["ods", "dwd", "ads"]
+BUILD_TASK = {"ods": "ods_ingest", "dwd": "dwd_build", "ads": "ads_build", "publish": "publish",
+              "forecast": "forecast_daily"}
+DQ_SQL = ("SELECT ds, layer, run_id, MAX(created_at) AS checked_at, COUNT(*) AS n, SUM(passed) AS n_pass, "
+          "SUM(severity='block' AND passed=0) AS block_fail FROM dq_run_log GROUP BY ds, layer, run_id")
+# 全量区间补录（backfill_range）和纯质检补录（backfill_dq）是按天摊开的整段记录，不算单日运行，健康指标里不用
+PER_DAY_RUN = "source NOT IN ('backfill_range','backfill_dq')"
+BUILD_SQL = ("SELECT task_id, MAX(ds) AS ds, MAX(end_ts) AS built_at FROM ops_task_run "
+             f"WHERE state='success' AND {PER_DAY_RUN} GROUP BY task_id")
+ALERT_SQL = ("SELECT layer, severity, status, COUNT(*) AS n FROM dq_alert "
+             "WHERE status IN ('open','ack') GROUP BY layer, severity, status")
+
+
+def _latest_dq(dq_rows):
+    """每个 (ds, layer) 只取最近一次质检。"""
+    last = {}
+    for r in dq_rows:
+        k = (str(r["ds"]), r["layer"])
+        if k not in last or str(r["checked_at"]) > str(last[k]["checked_at"]):
+            last[k] = r
+    return last
+
+
+def health_from(dq_rows, build_rows, alert_rows, run_rows, published, now, days=30):
+    last = _latest_dq(dq_rows or [])
+    built = {r["task_id"]: r for r in (build_rows or [])}
+
+    def age_h(v):
+        if v is None:
+            return None
+        v = v if isinstance(v, dt.datetime) else dt.datetime.fromisoformat(str(v))
+        return round((now - v).total_seconds() / 3600, 1)
+
+    freshness = {}
+    for layer in LAYERS:
+        ks = sorted(ds for ds, l in last if l == layer)
+        ok_ds = [ds for ds in ks if not int(last[(ds, layer)]["block_fail"] or 0)]
+        b = built.get(BUILD_TASK[layer]) or {}
+        freshness[layer] = {"latest_ds": ks[-1] if ks else None, "latest_passed_ds": ok_ds[-1] if ok_ds else None,
+                            "last_checked_at": _ts(max((last[(d, layer)]["checked_at"] for d in ks), default=None)),
+                            "last_built_at": _ts(b.get("built_at")), "built_age_hours": age_h(b.get("built_at"))}
+    for name in ("publish", "forecast"):
+        b = built.get(BUILD_TASK[name]) or {}
+        p = (published or {}).get(name) or {}
+        freshness[name] = {"latest_ds": str(b["ds"]) if b.get("ds") else None,
+                           "data_until": _ts(p.get("data_until")), "last_built_at": _ts(b.get("built_at") or p.get("written_at")),
+                           "built_age_hours": age_h(b.get("built_at") or p.get("written_at"))}
+
+    dq = {}
+    for layer in LAYERS:
+        ks = sorted(ds for ds, l in last if l == layer)[-days:]
+        rs = [last[(d, layer)] for d in ks]
+        n = sum(int(r["n"]) for r in rs)
+        npass = sum(int(r["n_pass"] or 0) for r in rs)
+        days_ok = sum(1 for r in rs if not int(r["block_fail"] or 0))
+        dq[layer] = {"days": len(rs), "days_passed": days_ok,
+                     "day_pass_rate": round(days_ok / len(rs), 4) if rs else None,
+                     "rules": n, "rules_passed": npass, "rule_pass_rate": round(npass / n, 4) if n else None,
+                     "blocked_days": [d for d, r in zip(ks, rs) if int(r["block_fail"] or 0)]}
+
+    by_day = {}
+    for r in run_rows or []:
+        by_day.setdefault(str(r["ds"]), []).append(r)
+    recent = sorted((day_summary(d, rs) for d, rs in by_day.items()),
+                    key=lambda x: x["started_at"] or "", reverse=True)[:7]
+    last_runs = [{"ds": x["ds"], "status": x["status"], "started_at": x["started_at"], "ended_at": x["ended_at"],
+                  "duration_s": x["duration_s"],
+                  "steps": {st["name"]: st["duration_s"] for st in x["steps"] if st["status"] not in ("not_recorded", "skipped")}}
+                 for x in recent]
+    durs = [x["duration_s"] for x in last_runs if x["duration_s"] is not None]
+
+    alerts = {"open": 0, "ack": 0, "by_layer": {}, "by_severity": {}}
+    for r in alert_rows or []:
+        n = int(r["n"])
+        alerts[r["status"]] = alerts.get(r["status"], 0) + n
+        if r["status"] == "open":
+            alerts["by_layer"][r["layer"]] = alerts["by_layer"].get(r["layer"], 0) + n
+            alerts["by_severity"][r["severity"]] = alerts["by_severity"].get(r["severity"], 0) + n
+
+    return {"generated_at": _ts(now), "freshness": freshness,
+            "last_runs": last_runs,
+            "last_runs_duration_s": {"avg": round(sum(durs) / len(durs), 3) if durs else None,
+                                     "max": max(durs) if durs else None, "min": min(durs) if durs else None},
+            "dq_pass_rate": dq, "dq_window_days": days, "open_alerts": alerts}
+
+
 def register(app, sql, ok, err):
     def _need(rows):
         return rows is None
@@ -123,6 +214,26 @@ def register(app, sql, ok, err):
         if not rows:
             return err(f"{ds} 没有运行记录", 404)
         return ok({**day_summary(ds, rows), "history": [_row(r) for r in rows]})
+
+    @app.get("/api/ops/health_metrics")
+    def ops_health_metrics():
+        try:
+            days = max(1, min(int(request_args("days") or 30), 400))
+        except ValueError:
+            return err("days 必须是整数")
+        dq_rows, build_rows = sql(DQ_SQL), sql(BUILD_SQL)
+        if dq_rows is None and build_rows is None:
+            return err("健康指标需要 MySQL（dq_run_log / ops_task_run），当前读不到", 503)
+        alert_rows = sql(ALERT_SQL)
+        run_rows = sql(f"SELECT {COLS} FROM ops_task_run WHERE {PER_DAY_RUN} AND ds IN (SELECT ds FROM "
+                       f"(SELECT ds FROM ops_task_run WHERE {PER_DAY_RUN} GROUP BY ds ORDER BY MAX(start_ts) DESC LIMIT 7) t) "
+                       "ORDER BY ds, start_ts, id")
+        pub = {}
+        for name, q in (("publish", "SELECT MAX(ts_hour) AS data_until, NULL AS written_at FROM ads_zone_occupancy_hour"),
+                        ("forecast", "SELECT MAX(ts_hour) AS data_until, MAX(created_at) AS written_at FROM ads_forecast_zone_hour")):
+            r = sql(q)
+            pub[name] = r[0] if r else {}
+        return ok(health_from(dq_rows, build_rows, alert_rows, run_rows, pub, dt.datetime.now(), days))
 
     return app
 
