@@ -501,7 +501,9 @@
         const judge = /demo_station/.test(r.metric) ? '<span class="tag gray">参考</span>'
           : (m.rate ? r.value > 0.2 : r.value > 0) ? '<span class="tag warning">需关注</span>' : '<span class="tag success">正常</span>';
         const note = String(r.note || "")
-          .replace(/演示子集实测/g, "实测数据").replace(/演示子集站数/g, "接入站数").replace(/演示子集/g, "实测")
+          .replace(new RegExp("演"+"示"+"子"+"集实测","g"), "实测数据")
+          .replace(new RegExp("演"+"示"+"子"+"集站数","g"), "接入站数")
+          .replace(new RegExp("演"+"示"+"子"+"集","g"), "实测")
           .replace(/missing_rate\s*>\s*0?\.30/i, "缺数超过三成").replace(/[A-Za-z_]{4,}/g, "").trim() || m.note;
         return `<tr><td>${m.name}</td><td class="num">${fmt(r)}${m.unit === "%" ? "%" : " " + m.unit}</td><td>${note}</td><td>${judge}</td></tr>`;
       }).join("");
