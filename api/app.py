@@ -440,9 +440,68 @@ if __name__ == "__main__":
 
 
 # ---- 片区地图 / 告警（小黄，前端第 6、7 页）----
+LAKE = os.getenv("SZ_EV_LAKE", "")
+
+
+@lru_cache(maxsize=1)
+def _lake_map():
+    """可选：SZ_EV_LAKE 指向数据湖根目录（含 ods/station_info、ads/zone_hour，可选 dwd/quality_station）时读 parquet。
+    只读需要的列并在 pyarrow 里聚合，内存占用很小；缺任何一块就返回 None，退回 demo CSV。"""
+    if not LAKE:
+        return None
+    root = Path(LAKE)
+    try:
+        import pyarrow.dataset as pads
+        import pyarrow.compute as pc
+        si = pads.dataset(root / "ods" / "station_info", format="parquet", partitioning="hive") \
+            .to_table(columns=["station_id", "longitude", "latitude", "charge_count", "taz_id"]).to_pylist()
+        zh = pads.dataset(root / "ads" / "zone_hour", format="parquet", partitioning="hive") \
+            .to_table(columns=["taz_id", "occupancy_avg", "piles_sum", "station_cnt"])
+        g = zh.group_by("taz_id").aggregate([("occupancy_avg", "mean"), ("piles_sum", "max"), ("station_cnt", "max")]).to_pylist()
+    except Exception:
+        return None
+    qual = {}
+    try:
+        qt = pads.dataset(root / "dwd" / "quality_station", format="parquet", partitioning="hive")
+        cols = ["station_id", "missing_rate", "stuck_flag", "gap_days_max"] + (["run"] if "run" in qt.schema.names else [])
+        for r in sorted(qt.to_table(columns=cols).to_pylist(), key=lambda r: str(r.get("run") or "")):
+            qual[str(r["station_id"])] = r  # 同一站多次运行时取最新一次
+    except Exception:
+        pass
+    occ = {str(r["taz_id"]): r for r in g}
+    stations, pos = [], defaultdict(lambda: [0.0, 0.0, 0, 0])
+    for r in si:
+        sid, taz = str(r["station_id"]), str(r["taz_id"])
+        q = qual.get(sid, {})
+        mr = q.get("missing_rate")
+        status = "stuck" if q.get("stuck_flag") == 1 else ("high_missing" if (mr or 0) > 0.30 else "normal")
+        stations.append({"station_id": sid, "taz_id": taz, "lon": r["longitude"], "lat": r["latitude"],
+                         "total_piles": r["charge_count"], "avg_occupancy": None,
+                         "missing_rate": round(mr, 4) if mr is not None else None,
+                         "status": status, "status_label": STATUS_LABEL[status]})
+        a = pos[taz]; a[0] += r["longitude"]; a[1] += r["latitude"]; a[2] += 1; a[3] += r["charge_count"] or 0
+    zones = []
+    for taz, (lon, lat, n, piles) in pos.items():
+        o = occ.get(taz, {})
+        v = o.get("occupancy_avg_mean")
+        zones.append({"taz_id": taz, "lon": round(lon / n, 6), "lat": round(lat / n, 6),
+                      "station_count": o.get("station_cnt_max") or n, "total_piles": o.get("piles_sum_max") or piles,
+                      "avg_occupancy": round(v, 4) if v is not None else None})
+    return zones, stations
+
+
 @app.get("/api/map/zones")
 def map_zones():
     """片区地图：每个片区的中心经纬度、站数、平均占用率，以及站点坐标。"""
+    lake = _lake_map()
+    if lake:
+        zones, stations = lake
+        taz = request.args.get("taz_id")
+        if taz:
+            return ok({"zones": [], "stations": [s for s in stations if s["taz_id"] == taz], "source": "lake"})
+        # 站多时不一次性返回，前端点片区时再按 taz_id 取
+        return ok({"zones": zones, "stations": stations if len(stations) <= 300 else [],
+                   "station_total": len(stations), "source": "lake"})
     if not use_file():
         return ok({"zones": [], "stations": []})
     demo_list = REPO / "data" / "demo" / "demo_station_list.csv"
@@ -474,10 +533,7 @@ ALERT_STATES = {"open", "ack", "closed"}
 _ALERTS: list[dict] | None = None
 
 # MySQL 表 dq_alert（小白在 quality/sql/ 下建表）。设置 ALERT_DB=mysql 才启用，否则用内存。
-# 读取时兼容的列名：alert_id|id, station_id, taz_id|zone_id, kind|rule_name, level|severity,
-# detail|message, status, created_at, note
-_ALERT_COLS = {"alert_id": ("alert_id", "id"), "taz_id": ("taz_id", "zone_id"), "kind": ("kind", "rule_name", "rule_type"),
-               "level": ("level", "severity"), "detail": ("detail", "message")}
+# 表结构见 quality/sql/dq_alert.sql（主键 alert_id，状态 open/ack/closed）。
 
 
 def _alert_db():
@@ -494,16 +550,19 @@ def _alert_db():
 
 
 def _norm_alert(r: dict) -> dict:
-    out = dict(r)
-    for k, names in _ALERT_COLS.items():
-        out[k] = next((r[n] for n in names if r.get(n) is not None), r.get(k))
-    st = out.get("status") or "open"
-    out["status"] = "ack" if st == "processing" else st
-    out["created_at"] = str(out.get("created_at") or "")[:16]
-    out.setdefault("note", "")
-    if out.get("level") in {"block", "warn"}:
-        out["level"] = "high" if out["level"] == "block" else "medium"
-    return {k: out.get(k) for k in ("alert_id", "station_id", "taz_id", "kind", "level", "detail", "status", "created_at", "note")}
+    """dq_alert 一行 -> 前端字段。station_id / taz_id 为空表示整批数据（规则级）告警。"""
+    sev = r.get("severity") or r.get("level")
+    level = {"block": "high", "warn": "medium"}.get(sev, sev or "low")
+    st = r.get("status") or "open"
+    fmt = lambda v: None if v is None else str(v)[:16]
+    return {
+        "alert_id": r.get("alert_id"), "ds": fmt(r.get("ds")), "layer": r.get("layer"),
+        "station_id": r.get("station_id"), "taz_id": r.get("taz_id"),
+        "kind": r.get("kind") or r.get("rule_name"), "rule_name": r.get("rule_name"), "level": level,
+        "metric_value": r.get("metric_value"), "threshold": r.get("threshold"),
+        "detail": r.get("detail") or "", "status": "ack" if st == "processing" else st,
+        "note": r.get("note") or "", "created_at": fmt(r.get("created_at")), "updated_at": fmt(r.get("updated_at")),
+    }
 
 
 def alerts_store():
@@ -517,13 +576,25 @@ def alerts_store():
             if s["status"] == "stuck":
                 kinds.append(("stuck", "读数长时间不变"))
             if s["missing_rate"] > 0.30:
-                kinds.append(("high_missing", f"缺数比例 {s['missing_rate']*100:.1f}%"))
+                kinds.append(("high_missing", "缺的数据太多"))
             if s["gap_days_max"] >= 2:
-                kinds.append(("long_gap", f"最长断档 {s['gap_days_max']} 天"))
+                kinds.append(("long_gap", "最长断档天数（天）"))
             for k, detail in kinds:
-                _ALERTS.append({"alert_id": len(_ALERTS) + 1, "station_id": s["station_id"], "taz_id": s["taz_id"],
-                                "kind": k, "level": ALERT_LEVEL[k], "detail": detail, "status": "open",
-                                "created_at": "2022-09-14 23:55", "note": ""})
+                mv, th = {"stuck": (1, None), "high_missing": (s["missing_rate"], 0.30), "long_gap": (s["gap_days_max"], 2)}[k]
+                _ALERTS.append({"alert_id": len(_ALERTS) + 1, "ds": "2022-09-14", "layer": "dwd",
+                                "station_id": s["station_id"], "taz_id": s["taz_id"], "kind": k, "rule_name": k,
+                                "level": ALERT_LEVEL[k], "metric_value": mv, "threshold": th, "detail": detail,
+                                "status": "open", "note": "", "created_at": "2022-09-14 23:55", "updated_at": None})
+        # 规则级（整批数据）示例：整体缺数比例
+        qr = _quality_rows() if use_file() else []
+        tot = sum(int(float(r.get("rows") or 0)) for r in qr)
+        q = {"row_missing_rate": round(sum(int(float(r.get("missing_rows") or 0)) for r in qr) / tot, 4)} if tot else {}
+        if q.get("row_missing_rate", 0) > 0.2:
+            _ALERTS.append({"alert_id": len(_ALERTS) + 1, "ds": "2022-09-14", "layer": "dwd", "station_id": None,
+                            "taz_id": None, "kind": "row_missing_rate", "rule_name": "row_missing_rate", "level": "medium",
+                            "metric_value": q["row_missing_rate"], "threshold": 0.2,
+                            "detail": "整批数据缺数比例偏高", "status": "open", "note": "",
+                            "created_at": "2022-09-14 23:55", "updated_at": None})
     return _ALERTS
 
 
@@ -544,7 +615,11 @@ def alerts_write(alert_id: int, status: str, note: str | None):
     if con:
         try:
             with con, con.cursor() as cur:
-                n = cur.execute("UPDATE dq_alert SET status=%s WHERE alert_id=%s", (status, alert_id))
+                if note is None:
+                    n = cur.execute("UPDATE dq_alert SET status=%s, updated_at=NOW() WHERE alert_id=%s", (status, alert_id))
+                else:
+                    n = cur.execute("UPDATE dq_alert SET status=%s, note=%s, updated_at=NOW() WHERE alert_id=%s",
+                                    (status, str(note)[:500], alert_id))
                 con.commit()
                 if n:
                     cur.execute("SELECT * FROM dq_alert WHERE alert_id=%s", (alert_id,))
@@ -556,7 +631,8 @@ def alerts_write(alert_id: int, status: str, note: str | None):
         if a["alert_id"] == alert_id:
             a["status"] = status
             if note is not None:
-                a["note"] = str(note)[:200]
+                a["note"] = str(note)[:500]
+            a["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
             return a
     return None
 

@@ -333,7 +333,7 @@
         return { taz_id: "demo_zone_1", points };
       })(),
       quality: [
-        { metric: "row_missing_rate", value: 0.2642, note: "25站14天窗实测" },
+        { metric: "row_missing_rate", value: 0.2642, note: "离线样例" },
         { metric: "stuck_station_cnt", value: 4, note: "实测数据" },
         { metric: "high_missing_station_cnt", value: 6, note: "missing_rate>0.30" },
         { metric: "demo_station_cnt", value: 25, note: "接入站数" },
@@ -696,13 +696,26 @@
     const pick = (o, ...ks) => { for (const k of ks) if (o[k] != null && o[k] !== "") return o[k]; return null; };
     const numOrNull = v => v == null ? null : +v;
     function normMapData(d) {
-      const stations = (d.stations || []).map(s => ({ ...s, taz_id: String(pick(s, "taz_id", "zone_id", "TAZID")),
+      const stations = stationsRaw(d).map(s => ({ ...s, taz_id: String(pick(s, "taz_id", "zone_id", "TAZID")),
         lon: numOrNull(pick(s, "lon", "longitude")), lat: numOrNull(pick(s, "lat", "latitude")),
         avg_occupancy: numOrNull(pick(s, "avg_occupancy", "occupancy_avg", "avg_occ")), total_piles: numOrNull(pick(s, "total_piles", "charge_count", "piles")) }));
-      let zones = (d.zones || []).map(z => ({ taz_id: String(pick(z, "taz_id", "zone_id")),
+      // ads zone_hour 逐小时行（taz_id, ts_hour, occupancy_avg, busy_sum, piles_sum, station_cnt）先按片区算日均
+      let zrows = d.zones || d.zone_hour || [];
+      if (zrows.length && zrows[0].ts_hour) {
+        const g = {};
+        zrows.forEach(r => { const k = String(r.taz_id); const a = g[k] ||= { taz_id: k, occ: [], station_cnt: 0, piles_sum: 0, lon: r.lon, lat: r.lat };
+          if (r.occupancy_avg != null) a.occ.push(+r.occupancy_avg); a.station_cnt = Math.max(a.station_cnt, +r.station_cnt || 0); a.piles_sum = Math.max(a.piles_sum, +r.piles_sum || 0); });
+        const pos = {};
+        stationsRaw(d).forEach(s => { const k = String(pick(s, "taz_id", "TAZID")); const lon = +pick(s, "lon", "longitude"), lat = +pick(s, "lat", "latitude");
+          if (!isNaN(lon)) { const p = pos[k] ||= [0, 0, 0]; p[0] += lon; p[1] += lat; p[2]++; } });
+        zrows = Object.values(g).map(a => ({ taz_id: a.taz_id, station_cnt: a.station_cnt, piles_sum: a.piles_sum,
+          avg_occupancy: a.occ.length ? a.occ.reduce((x, y) => x + y, 0) / a.occ.length : null,
+          lon: a.lon ?? (pos[a.taz_id] ? pos[a.taz_id][0] / pos[a.taz_id][2] : null), lat: a.lat ?? (pos[a.taz_id] ? pos[a.taz_id][1] / pos[a.taz_id][2] : null) }));
+      }
+      let zones = zrows.map(z => ({ taz_id: String(pick(z, "taz_id", "zone_id")),
         lon: numOrNull(pick(z, "lon", "center_lon", "longitude")), lat: numOrNull(pick(z, "lat", "center_lat", "latitude")),
         avg_occupancy: numOrNull(pick(z, "avg_occupancy", "occupancy_avg", "avg_occ")),
-        station_count: +(pick(z, "station_count", "station_cnt") || 0), total_piles: +(pick(z, "total_piles", "pile_cnt") || 0) }));
+        station_count: +(pick(z, "station_count", "station_cnt") || 0), total_piles: +(pick(z, "total_piles", "piles_sum", "pile_cnt") || 0) }));
       if (!zones.length && stations.length) {
         const g = {};
         stations.forEach(s => { const a = g[s.taz_id] ||= { taz_id: s.taz_id, lon: 0, lat: 0, n: 0, occ: [], total_piles: 0 };
@@ -710,14 +723,20 @@
         zones = Object.values(g).filter(a => a.n).map(a => ({ taz_id: a.taz_id, lon: a.lon / a.n, lat: a.lat / a.n, station_count: a.station_count, total_piles: a.total_piles,
           avg_occupancy: a.occ.length ? a.occ.reduce((x, y) => x + y, 0) / a.occ.length : null }));
       }
-      return { zones: zones.filter(z => z.lon != null && z.lat != null), stations };
+      const stationTotal = +(d.station_total || stations.length);
+      return { zones: zones.filter(z => z.lon != null && z.lat != null), stations, stationTotal, partial: stationTotal > stations.length };
+    }
+    const stationsRaw = d => d.stations || d.station_info || [];
+    // 全量时接口不一次给全部站，点片区时再按片区取
+    async function fetchZoneStations(taz) {
+      try { return normMapData(await apiGet(`/api/map/zones?taz_id=${encodeURIComponent(taz)}`)).stations; } catch (e) { return []; }
     }
     let mapData = { zones: [], stations: [] }, mapZone = "";
     const occColor = v => v == null ? "#C9CDD4" : v > 0.5 ? "#F53F3F" : v > 0.3 ? "#FF7D00" : v > 0.15 ? "#165DFF" : "#94BFFF";
     async function loadMap() {
       mapData = await fetchMapData();
       const z = mapData.zones;
-      $("mapExtra").textContent = `${z.length} 个片区 · ${mapData.stations.length || "—"} 个站` + (mapData.offline ? " · 离线样例" : "");
+      $("mapExtra").textContent = `${z.length} 个片区 · ${mapData.stationTotal || "—"} 个站` + (mapData.offline ? " · 离线样例" : "");
       charts.chartMap.setOption({
         tooltip: { trigger: "item", formatter: p => { const d = p.data.raw; return `片区 ${d.taz_id}<br>站数 ${d.station_count}，桩数 ${d.total_piles}<br>平均占用率 ${d.avg_occupancy == null ? "暂无数据" : pct(d.avg_occupancy)}`; } },
         grid: { left: 56, right: 24, top: 24, bottom: 40 },
@@ -732,14 +751,15 @@
       $("mapRank").querySelectorAll("a[data-z]").forEach(a => a.onclick = () => pickZone(a.dataset.z));
       pickZone(mapZone);
     }
-    function pickZone(z) {
+    async function pickZone(z) {
       mapZone = z || "";
+      if (mapZone && mapData.partial && !mapData.stations.some(s => s.taz_id === mapZone)) mapData.stations.push(...await fetchZoneStations(mapZone));
       const list = mapData.stations.filter(s => !mapZone || String(s.taz_id) === mapZone).slice(0, mapZone ? 500 : 50);
       // 站点小点只在点进某个片区后才画，站多时地图不会糊成一片
       charts.chartMap.setOption({ series: [{}, { id: "st", data: mapZone ? list.filter(s => s.lon != null).map(s => ({ value: [s.lon, s.lat], raw: s })) : [] }] });
-      $("mapZoneTitle").textContent = mapZone ? `片区 ${mapZone} 里的站` : (mapData.stations.length > 50 ? `全部片区的站（先列前 50 个，点片区看全部）` : "全部片区的站");
+      $("mapZoneTitle").textContent = mapZone ? `片区 ${mapZone} 里的站` : (mapData.partial ? "站点较多，点地图上的片区查看" : mapData.stations.length > 50 ? `全部片区的站（先列前 50 个，点片区看全部）` : "全部片区的站");
       $("mapStations").innerHTML = list.map(s => `<tr><td>站点 ${s.station_id}</td><td>片区 ${s.taz_id}</td><td class="num">${s.total_piles ?? "—"}</td>
-        <td class="num">${s.avg_occupancy == null ? "—" : pct(s.avg_occupancy)}</td><td class="num">${pct(s.missing_rate)}</td>
+        <td class="num">${s.avg_occupancy == null ? "—" : pct(s.avg_occupancy)}</td><td class="num">${s.missing_rate == null ? "—" : pct(s.missing_rate)}</td>
         <td><span class="tag ${s.status === "normal" ? "success" : s.status === "stuck" ? "danger" : "warning"}">${s.status_label}</span></td></tr>`).join("")
         || `<tr><td colspan="6" class="empty">${mapData.offline ? "接口连不上，暂时看不到站点" : "这个片区没有站"}</td></tr>`;
     }
@@ -747,7 +767,16 @@
     $("mapZoneAll").onclick = () => pickZone("");
 
     /* ---------- 异常告警 ---------- */
-    const ALERT_KIND = { stuck: "读数不动", high_missing: "缺数偏多", long_gap: "长时间没数据" };
+    const ALERT_KIND = { stuck: "读数不动", high_missing: "缺数偏多", long_gap: "长时间没数据", row_missing_rate: "整体缺数偏多" };
+    const LAYER_CN = { ods: "原始数据", dwd: "清洗后数据", ads: "汇总结果" };
+    const fmtVal = (v, asPct) => v == null ? "—" : asPct ? (v * 100).toFixed(1) + "%" : String(+(+v).toFixed(2));
+    function alertDetail(a) {
+      const parts = [];
+      if (a.detail) parts.push(a.detail);
+      if (a.metric_value != null) { const pc = a.threshold != null && +a.threshold > 0 && +a.threshold < 1; parts.push(`实际 ${fmtVal(a.metric_value, pc)}${a.threshold != null ? `，上限 ${fmtVal(a.threshold, pc)}` : ""}`); }
+      const where = [a.ds, LAYER_CN[a.layer] || a.layer].filter(Boolean).join(" · ");
+      return `${parts.join("；") || "—"}${where ? `<div class="readonly-note">${where}</div>` : ""}`;
+    }
     const ALERT_LEVEL = { high: ["紧急", "danger"], medium: ["一般", "warning"], low: ["提醒", "gray"] };
     const ALERT_STATUS = { open: ["待处理", "danger"], ack: ["处理中", "blue"], closed: ["已关闭", "success"] };
     let alertList = [], alertFilter = "all", alertsOffline = false;
@@ -777,8 +806,8 @@
           : a.status === "open" ? `<a data-id="${a.alert_id}" data-to="ack">开始处理</a> <a data-id="${a.alert_id}" data-to="closed" style="margin-left:8px">直接关闭</a>`
           : a.status === "ack" ? `<a data-id="${a.alert_id}" data-to="closed">处理完了</a>`
           : `<a data-id="${a.alert_id}" data-to="open">重新打开</a>`;
-        return `<tr><td class="num" style="text-align:left">AL-${String(a.alert_id).padStart(4, "0")}</td><td>站点 ${a.station_id}</td><td>片区 ${a.taz_id}</td>
-          <td>${ALERT_KIND[a.kind] || "其他"}</td><td>${a.detail}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.created_at}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
+        return `<tr><td class="num" style="text-align:left">AL-${String(a.alert_id).padStart(4, "0")}</td><td>${a.station_id == null ? "整批数据" : `站点 ${a.station_id}`}</td><td>${a.taz_id == null ? (a.station_id == null ? "全部片区" : "—") : `片区 ${a.taz_id}`}</td>
+          <td>${ALERT_KIND[a.kind] || a.rule_name || a.kind || "其他"}</td><td>${alertDetail(a)}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.created_at}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
       }).join("") || `<tr><td colspan="9" class="empty">没有这类告警</td></tr>`;
       $("alertBody").querySelectorAll("a[data-id]").forEach(el => el.onclick = async () => {
         const a = alertList.find(x => x.alert_id === +el.dataset.id); const to = el.dataset.to;

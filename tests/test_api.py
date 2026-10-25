@@ -131,3 +131,24 @@ def test_map_zones(client):
     d = client.get("/api/map/zones").get_json()["data"]
     assert d["zones"] and all({"taz_id", "lon", "lat", "station_count"} <= set(z) for z in d["zones"])
     assert all("lon" in s and "taz_id" in s for s in d["stations"])
+
+
+def test_alert_rule_level_and_ddl_fields(client):
+    alerts = client.get("/api/alerts").get_json()["data"]
+    assert all({"ds", "layer", "metric_value", "threshold", "updated_at"} <= set(a) for a in alerts)
+    assert any(a["station_id"] is None for a in alerts)
+
+
+def test_norm_alert_from_ddl_row():
+    import app as appmod
+    a = appmod._norm_alert({"alert_id": 7, "ds": "2022-09-02", "layer": "ods", "rule_name": "row_count", "severity": "block",
+                            "station_id": None, "taz_id": None, "metric_value": 0.0, "threshold": 1.0, "status": "ack"})
+    assert a["level"] == "high" and a["status"] == "ack" and a["kind"] == "row_count" and a["station_id"] is None
+
+
+def test_lake_map_optional(monkeypatch, tmp_path):
+    import app as appmod
+    monkeypatch.setattr(appmod, "LAKE", str(tmp_path / "nope"))
+    appmod._lake_map.cache_clear()
+    assert appmod._lake_map() is None
+    appmod._lake_map.cache_clear()

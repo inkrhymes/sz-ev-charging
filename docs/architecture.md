@@ -92,3 +92,5 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 
 ### 8.5 调度与质检（小白）
 已在第 4、5 节写完；设计细节见 `docs/orchestration_design.md`。
+
+**全量数据（小黄补充）**：设置 `SZ_EV_LAKE=<lake 根目录>` 后，`/api/map/zones` 直接读 `ods/station_info`（站点坐标、所属片区）和 `ads/zone_hour`（按片区把逐小时占用率求平均），有 `dwd/quality_station` 时顺带给出每站缺数比例；站点超过 300 个时不一次返回，前端点片区时再用 `?taz_id=` 取。没设或文件不全时退回演示数据。告警表按 `quality/sql/dq_alert.sql` 读写（`alert_id`、`ds`、`layer`、`rule_name`、`severity`、`metric_value`、`threshold`、`note`），改状态时同时更新 `updated_at`；整批规则产生的告警没有站和片区，页面显示「整批数据」。
