@@ -47,7 +47,7 @@
 |------|--------|
 | 整行缺失率 | 26.42%（26,631 / 100,800） |
 | 疑似卡死站 | 4 |
-| 站级缺失率 &gt; 30% | 6 |
+| 站级缺失率 > 30% | 6 |
 | 工单建议 | repair 4 / inspect 6 |
 
 完整说明见 `docs/quality_report.md`、`docs/demo_subset_rules.txt`、`docs/data_dictionary.md`。
@@ -176,4 +176,4 @@ python3 etl/clean_to_dwd.py           # 更新 docs/quality_report.md
 
 ## 9. 数据来源与许可
 
-演示数据来源于 UrbanEV 公开数据集（深圳充电站运行记录，5 分钟粒度，许可为 CC0）。本仓库仅收录按规则选取的演示子集元数据与必要的小体积聚合结果；完整原始文件请自行按数据集官方说明获取，勿将大体量原始 CSV 强行推入本仓库。
+演示数据来源于 UrbanEV 公开数据集（深圳充电站运行记录，5 分钟粒度，许可为 CC0）。数据集主页：[Dryad doi:10.5061/dryad.np5hqc04z](https://datadryad.org/dataset/doi:10.5061/dryad.np5hqc04z)；配套代码：[IntelligentSystemsLab/UrbanEV](https://github.com/IntelligentSystemsLab/UrbanEV)。本仓库仅收录按规则选取的演示子集元数据与必要的小体积聚合结果；完整原始文件请自行按数据集官方说明获取，勿将大体量原始 CSV 强行推入本仓库。
