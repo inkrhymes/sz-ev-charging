@@ -169,3 +169,10 @@ spark/run_range.sh --start 2022-09-01 --end 2022-09-14 --dry-run
 `city_overview.stuck_cnt` 是另一回事：当天被标记为卡死的站数（按天统计），不是累计。
 
 `ads_zone_occupancy_hour.load_kw_est`（= 占用率 × 片区额定功率之和）目前全为 NULL：UrbanEV 站点表只有站点位置和慢充/快充桩数，没有额定功率字段，算不出来，所以如实留空，没有用假设功率去估。
+
+## 不起 Spark 的回写路径（MySQL 重建后用）
+
+`spark/jobs/export_ads_parquet.py` 只用 pyarrow/pandas/pymysql，直接读 `$SZ_WAREHOUSE/ads.db/*/dt=*/` 的 Parquet 和 `$SZ_EV_LAKE` 里的站点表、站级质量表，写回与 `export_ads_mysql.py` 相同的 6 张表，不需要 Hive metastore。
+`--exclude D` 可重复，被排除的日期在 MySQL 里原样保留（只 DELETE 本次要写的日期）。`--dry-run` 只统计行数。
+Hive 表的 `ts_hour` 是 Spark 写的 INT96（按 UTC 存），脚本按 `SZ_SPARK_TZ`（默认 Asia/Shanghai）还原成本地时间，已与湖里 `ads/zone_hour`（TIMESTAMP_NTZ）逐行对齐核对过。
+若 metastore 丢失：`ads_build.py` 启动时会自动建库、重建外表 `dwd.ext_charge_5min_clean` 并 `MSCK REPAIR`；ads 内部表需重跑 `ads_build --start/--end` 重新生成。
