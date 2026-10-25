@@ -80,7 +80,7 @@ def _sql(query: str, args=()) -> list[dict] | None:
         import pymysql
         conn = pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
                                user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
-                               database=os.getenv("MYSQL_DATABASE", os.getenv("MYSQL_DB", "sz_ev")), charset="utf8mb4",
+                               database=os.getenv("MYSQL_DATABASE", os.getenv("MYSQL_DB", "sz_ev")), charset="utf8mb4", init_command="SET time_zone='+08:00'",
                                cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
     except Exception:
         return None
@@ -498,8 +498,32 @@ def baseline():
                "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
 
 
+# 工单：ALERT_DB=mysql 时存 ads_ticket（含 alert_id 列，见 sql/migrations/20261025_ads_ticket_alert_id.sql），否则进程内存
+def _ticket_out(r: dict) -> dict:
+    fmt = lambda v: None if v is None else str(v)[:16]
+    return {"ticket_id": r["ticket_id"], "station_id": r["station_id"], "type": r["type"], "status": r["status"],
+            "alert_id": r.get("alert_id"), "created_at": fmt(r.get("created_at")), "updated_at": fmt(r.get("updated_at"))}
+
+
+def _ticket_db_call(fn):
+    """在 ads_ticket 上执行 fn(cur)；未启用或出错返回 (False, None)，调用方退回内存。"""
+    con = _alert_db()
+    if not con:
+        return False, None
+    try:
+        with con, con.cursor() as cur:
+            r = fn(cur)
+            con.commit()
+            return True, r
+    except Exception:
+        return False, None
+
+
 @app.get("/api/tickets")
 def tickets_list():
+    used, rows = _ticket_db_call(lambda cur: (cur.execute("SELECT * FROM ads_ticket ORDER BY ticket_id"), cur.fetchall())[1])
+    if used:
+        return ok([_ticket_out(r) for r in rows])
     return ok(tickets_store())
 
 
@@ -525,6 +549,16 @@ def tickets_patch(ticket_id):
     status = body.get("status")
     if status not in {"open", "processing", "done"}:
         return err("status must be open|processing|done")
+    def upd(cur):
+        if not cur.execute("UPDATE ads_ticket SET status=%s, updated_at=NOW() WHERE ticket_id=%s", (status, ticket_id)):
+            cur.execute("SELECT 1 FROM ads_ticket WHERE ticket_id=%s", (ticket_id,))
+            if not cur.fetchone():
+                return None
+        cur.execute("SELECT * FROM ads_ticket WHERE ticket_id=%s", (ticket_id,))
+        return _ticket_out(cur.fetchone())
+    used, t = _ticket_db_call(upd)
+    if used:
+        return ok(t) if t else err("ticket not found", 404)
     for t in tickets_store():
         if t["ticket_id"] == ticket_id:
             t["status"] = status
@@ -535,7 +569,7 @@ def tickets_patch(ticket_id):
 @app.post("/api/tickets")
 def tickets_create():
     """从告警派工单：{station_id, type?, alert_id?}。带 alert_id 时同一条告警只派一次，并把告警改成处理中（ack）。
-    工单仍保存在进程内存（ads_ticket 表没有 alert_id 列）。"""
+    ALERT_DB=mysql 时写 ads_ticket，否则存进程内存。"""
     denied = _require_admin()
     if denied:
         return denied
@@ -547,9 +581,26 @@ def tickets_create():
     if typ not in {"repair", "inspect"}:
         return err("type must be repair|inspect")
     alert_id = body.get("alert_id")
-    store = tickets_store()
     if alert_id is not None:
         alert_id = int(alert_id)
+
+    def ins(cur):
+        if alert_id is not None:
+            cur.execute("SELECT ticket_id FROM ads_ticket WHERE alert_id=%s LIMIT 1", (alert_id,))
+            d = cur.fetchone()
+            if d:
+                return {"dup": d["ticket_id"]}
+        cur.execute("INSERT INTO ads_ticket (station_id, alert_id, type, status) VALUES (%s, %s, %s, 'open')", (sid, alert_id, typ))
+        cur.execute("SELECT * FROM ads_ticket WHERE ticket_id=%s", (cur.lastrowid,))
+        return _ticket_out(cur.fetchone())
+    used, t = _ticket_db_call(ins)
+    if used:
+        if "dup" in t:
+            return err(f"这条告警已经派过工单 WO-{t['dup']:04d}", 409)
+        alert = alerts_write(alert_id, "ack", f"已派工单 WO-{t['ticket_id']:04d}") if alert_id is not None else None
+        return ok({"ticket": t, "alert": alert}), 201
+    store = tickets_store()
+    if alert_id is not None:
         dup = next((t for t in store if t.get("alert_id") == alert_id), None)
         if dup:
             return err(f"这条告警已经派过工单 WO-{dup['ticket_id']:04d}", 409)
@@ -728,7 +779,7 @@ def _mysql_map():
         import pymysql
         conn = pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
                                user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
-                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", connect_timeout=3,
+                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", init_command="SET time_zone='+08:00'", connect_timeout=3,
                                cursorclass=pymysql.cursors.DictCursor)
         with conn, conn.cursor() as cur:
             cur.execute("SELECT station_id, taz_id, longitude, latitude, total_piles FROM dim_station")
@@ -814,7 +865,7 @@ def _alert_db():
         import pymysql
         return pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
                                user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
-                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4",
+                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", init_command="SET time_zone='+08:00'",
                                cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
     except Exception:
         return None  # 连不上就退回内存

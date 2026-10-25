@@ -813,8 +813,7 @@
     // 后端 detail 里规则名、字段名一类的写法换成大白话
     function alertText(a) {
       const d = String(a.detail || "").replace(/^\[告警\]\s*/, "").replace(/（>=\s*[\d.]+\s*天）/, "");
-      if (/层规则|station_id|未通过/.test(d)) return `${ALERT_KIND[a.rule_name] || "整批数据检查没通过"}`;
-      return d;
+      return d || ALERT_KIND[a.rule_name] || "";
     }
     function alertDetail(a) {
       const parts = [];
@@ -875,7 +874,7 @@
           : a.status === "ack" ? `<a data-id="${a.alert_id}" data-to="closed">处理完了</a>`
           : `<a data-id="${a.alert_id}" data-to="open">重新打开</a>`;
         return `<tr><td class="num" style="text-align:left">AL-${String(a.alert_id).padStart(4, "0")}</td><td>${a.station_id == null ? "整批数据" : `<a data-map="${a.taz_id ?? ""}" title="在地图上看所在片区">站点 ${a.station_id}</a>`}</td><td>${a.taz_id == null ? (a.station_id == null ? "全部片区" : "—") : `片区 ${a.taz_id}`}</td>
-          <td>${ALERT_KIND[a.kind] || a.rule_name || a.kind || "其他"}</td><td>${alertDetail(a)}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.ds || a.created_at || "—"}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
+          <td>${ALERT_KIND[a.kind] || a.rule_name || a.kind || "其他"}</td><td>${alertDetail(a)}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.created_at || a.ds || "—"}${a.updated_at && a.updated_at !== a.created_at ? `<div class="readonly-note">更新于 ${a.updated_at}</div>` : ""}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
       }).join("") || `<tr><td colspan="9" class="empty">没有这类告警</td></tr>`;
       $("alertBody").querySelectorAll("a[data-id]").forEach(el => el.onclick = async () => {
         const a = alertList.find(x => x.alert_id === +el.dataset.id); const to = el.dataset.to;
