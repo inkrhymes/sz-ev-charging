@@ -44,7 +44,7 @@ def message_schema():
 def build_spark(source: str, app="sz-rt-zone-occupancy"):
     from pyspark.sql import SparkSession
     b = (SparkSession.builder.appName(app)
-         .master(os.getenv("SZ_SPARK_MASTER", "local[2]"))
+         .master(os.getenv("SZ_SPARK_MASTER", "local[1]"))
          .config("spark.driver.memory", os.getenv("SZ_DRIVER_MEM", "1g"))
          .config("spark.sql.shuffle.partitions", os.getenv("SZ_RT_SHUFFLE", "4"))
          .config("spark.sql.session.timeZone", "Asia/Shanghai")

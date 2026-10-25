@@ -84,3 +84,14 @@ KAFKA_BOOTSTRAP=localhost:9092 python stream/zone_occupancy_stream.py --source k
 
 `--sink csv --out DIR` 或 `--sink console` 用于调试。开流作业时不要同时跑 Airflow 或离线 Spark。
 测试：`tests/stream/test_zone_occupancy_stream.py` 用 file 模式和造的小数据跑一遍，没装 pyspark 时自动跳过。
+
+### 6.1 起 Kafka（单节点 KRaft，第三段）
+
+```bash
+docker compose --profile stream up -d kafka kafka-init   # kafka 内存上限 512M，堆 256M；kafka-init 建 charge_5min（6 分区，1 副本）后退出
+export KAFKA_BOOTSTRAP=localhost:9092
+SZ_SPARK_MASTER=local[1] SZ_DRIVER_MEM=1g python stream/zone_occupancy_stream.py ...   # 默认即 local[1] + 1g
+```
+
+- broker 关闭了自动建 topic，必须先跑 kafka-init。
+- 内存紧张：回放时先停 API/Redis，不与 ads_build/Airflow/Locust 同时跑；开跑前后在群里报。
