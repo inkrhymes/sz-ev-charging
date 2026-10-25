@@ -338,7 +338,7 @@
           points.push({
             ts_hour: `2022-09-0${1 + Math.floor(i/24)} ${String(i%24).padStart(2,"0")}:00:00`,
             occupancy: +(0.3 + 0.2 * ((i % 24) / 24)).toFixed(4),
-            load_kw_est: +(120 + 40 * ((i % 24) / 24)).toFixed(2),
+            load_kw_est: null,
           });
         }
         return { taz_id: "demo_zone_1", points };
@@ -369,7 +369,12 @@
     /* ---------- 文案映射：界面上不出现原始字段名 / 英文状态 ---------- */
     const METRIC = {
       row_missing_rate: { name: "缺数比例", unit: "%", rate: true, note: "缺了多少条记录（按每 5 分钟一条算）" },
-      stuck_station_cnt: { name: "读数异常", unit: "座", note: "连续多个时段读数一直不动的站" },
+      station_cnt: { name: "接入站点", unit: "座", note: "有数据的站一共多少座" },
+      stuck_station_cnt: { name: "长期卡死的站", unit: "座", note: "累计卡死满 30 天的站", tip: "某天读数从早到晚一直是同一个值，就算卡死一天；一个站加起来卡死满 30 天就算进来" },
+      stuck_any_day_cnt: { name: "至少卡死过一天的站", unit: "座", note: "半年里有过一天读数从早到晚不变的站" },
+      stuck_whole_window_cnt: { name: "半年里一直卡死的站", unit: "座", note: "整段时间读数从来没变过的站" },
+      repair_ticket_cnt: { name: "建议维修", unit: "座", note: "卡死时间长、建议派人维修的站" },
+      inspect_ticket_cnt: { name: "建议巡检", unit: "座", note: "缺数多但还没到维修、建议去看看的站" },
       high_missing_station_cnt: { name: "缺数偏多", unit: "座", note: "缺数超过三成" },
       demo_station_cnt: { name: "样本站", unit: "座", note: "接入本系统的站" },
     };
@@ -464,15 +469,17 @@
         yAxis: autoOccAxis(),
         series: [{ name: "占用率", type: "line", data: pts.map(p => p.occupancy), areaStyle: { color: "rgba(22,93,255,0.08)" } }],
       }, true);
+      // 站点表还没有额定功率时负荷全为空：图上不画、表里显示「暂无」；有值后自动显示
+      const hasLoad = pts.some(p => p.load_kw_est != null);
       charts.chartSeries.setOption({
-        legend: { data: ["占用率", "估算负荷（kW）"] },
+        legend: { data: ["占用率", "估算负荷（kW）"], formatter: n => n.startsWith("估算") && !hasLoad ? "估算负荷（暂无）" : n },
         grid: { left: 48, right: 56, top: 40, bottom: 32 },
         xAxis: { type: "category", data: x, boundaryGap: false },
         yAxis: [autoOccAxis({ name: "占用率", nameTextStyle: { color: "#86909C" } }),
                 { type: "value", name: "kW", nameTextStyle: { color: "#86909C" }, splitLine: { show: false } }],
         series: [
           { name: "占用率", type: "line", data: pts.map(p => p.occupancy) },
-          { name: "估算负荷（kW）", type: "line", yAxisIndex: 1, data: pts.map(p => p.load_kw_est) },
+          { name: "估算负荷（kW）", type: "line", yAxisIndex: 1, data: pts.map(p => p.load_kw_est ?? null) },
         ],
       }, true);
       renderSeriesTable();
@@ -494,7 +501,7 @@
       const size = 10, rows = seriesPts.slice((seriesPage - 1) * size, seriesPage * size);
       $("seriesCount").textContent = `${seriesPts.length} 条`;
       $("seriesBody").innerHTML = rows.length ? rows.map(p => `<tr><td class="num" style="text-align:left">${p.ts_hour.slice(0, 16)}</td><td>${seriesTaz}</td>
-        <td class="num">${(p.occupancy * 100).toFixed(1)}%</td><td class="num">${(+p.load_kw_est).toFixed(1)}</td></tr>`).join("")
+        <td class="num">${(p.occupancy * 100).toFixed(1)}%</td><td class="num">${p.load_kw_est == null ? '<span style="color:var(--text-3)">暂无</span>' : (+p.load_kw_est).toFixed(1)}</td></tr>`).join("")
         : `<tr><td colspan="4" class="empty">所选条件下暂无数据</td></tr>`;
       pager($("seriesPager"), seriesPts.length, seriesPage, size, n => { seriesPage = n; renderSeriesTable(); });
     }
@@ -581,23 +588,37 @@
     }
 
     /* ---------- 数据质量 ---------- */
+    // 接口说明里去掉代码路径、英文字段名，内部叫法换成大白话
+    const cleanNote = t => { const v = cleanNote0(t); return /[\u4e00-\u9fa5\d]/.test(v) ? v : ""; };
+    const cleanNote0 = t => String(t || "")
+      .replace(/（[^）]*[A-Za-z_]{3,}[^）]*）/g, "")
+      .replace(new RegExp("演"+"示"+"子"+"集实测","g"), "实测数据")
+      .replace(new RegExp("演"+"示"+"子"+"集站数","g"), "接入站数")
+      .replace(new RegExp("演"+"示"+"子"+"集","g"), "实测")
+      .replace(/missing_rate\s*>\s*0?\.30/i, "缺数超过三成").replace(/锁定\s*(\d+)\s*站/, "接入 $1 座站")
+      .replace(/已入仓/g, "已接入").replace(/窗口/g, "时间段").replace(/[A-Za-z_]{4,}/g, "").trim();
     function renderQuality(rows) {
       const fmt = r => { const m = METRIC[r.metric] || {}; return m.rate ? (r.value * 100).toFixed(2) : r.value; };
-      const level = r => /stuck/.test(r.metric) ? "danger" : /high_missing|missing_rate/.test(r.metric) ? "warning" : "";
+      const level = r => /stuck|repair/.test(r.metric) ? "danger" : /high_missing|missing_rate|inspect/.test(r.metric) ? "warning" : "";
+      const ORDER = ["station_cnt", "demo_station_cnt", "row_missing_rate", "high_missing_station_cnt", "stuck_station_cnt", "stuck_any_day_cnt",
+        "stuck_whole_window_cnt", "repair_ticket_cnt", "inspect_ticket_cnt"];
+      const rk = m => { const i = ORDER.indexOf(m); return i < 0 ? 99 : i; };
+      rows = [...rows].sort((a, b) => rk(a.metric) - rk(b.metric));
+      // 接口给的说明若是中文就直接用，否则用本地说明
+      const apiNote = r => /[\u4e00-\u9fa5]/.test(r.note || "") ? cleanNote(r.note) : "";
       $("qualityKpis").innerHTML = rows.map(r => {
         const m = METRIC[r.metric] || { name: "其他指标", unit: "", note: "" };
-        return `<div class="card col-6 kpi"><div class="kpi-label">${m.name}${tip(m.note)}</div>
-          <div class="kpi-val ${level(r)}">${fmt(r)}<small>${m.unit}</small></div><div class="kpi-foot">${m.note}</div></div>`;
+        // 库还没重算时 stuck_station_cnt 的说明是旧意思（全程不动），这时用本地说明，免得和标题对不上
+        const stale = r.metric === "stuck_station_cnt" && /整个/.test(r.note || "");
+        const foot = (!stale && apiNote(r)) || m.note;
+        return `<div class="card col-8 kpi"><div class="kpi-label" title="${m.name}">${m.name}${tip(m.tip || m.note)}</div>
+          <div class="kpi-val ${level(r)}">${fmt(r)}<small>${m.unit}</small></div><div class="kpi-foot" title="${foot}">${foot}</div></div>`;
       }).join("");
       $("qualityBody").innerHTML = rows.map(r => {
         const m = METRIC[r.metric] || { name: "其他指标", unit: "", note: "" };
-        const judge = /demo_station/.test(r.metric) ? '<span class="tag gray">参考</span>'
+        const judge = /demo_station|^station_cnt/.test(r.metric) ? '<span class="tag gray">参考</span>'
           : (m.rate ? r.value > 0.2 : r.value > 0) ? '<span class="tag warning">需关注</span>' : '<span class="tag success">正常</span>';
-        const note = String(r.note || "")
-          .replace(new RegExp("演"+"示"+"子"+"集实测","g"), "实测数据")
-          .replace(new RegExp("演"+"示"+"子"+"集站数","g"), "接入站数")
-          .replace(new RegExp("演"+"示"+"子"+"集","g"), "实测")
-          .replace(/missing_rate\s*>\s*0?\.30/i, "缺数超过三成").replace(/[A-Za-z_]{4,}/g, "").trim() || m.note;
+        const note = (r.metric === "stuck_station_cnt" && /整个/.test(r.note || "") ? "" : cleanNote(r.note)) || m.note;
         return `<tr><td>${m.name}</td><td class="num">${fmt(r)}${m.unit === "%" ? "%" : " " + m.unit}</td><td>${note}</td><td>${judge}</td></tr>`;
       }).join("");
     }

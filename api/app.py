@@ -324,13 +324,13 @@ def zone_series():
             busy = float(r.get("busy_sum") or 0)
             piles = float(r.get("piles_sum") or 0) or 1
             occ = float(r.get("occupancy_avg") or 0)
-            # load ≈ occupancy * piles * 7kW rough demo
+            # 数据里没有额定功率，负荷不估算，留空（前端显示「暂无」）
             points.append(
                 {
                     "taz_id": taz_id,
                     "ts_hour": r["ts_hour"],
                     "occupancy": round(occ, 6),
-                    "load_kw_est": round(occ * piles * 7.0, 2),
+                    "load_kw_est": None,
                 }
             )
             if len(points) >= 168 and not request.args.get("to"):
@@ -343,7 +343,7 @@ def zone_series():
             "taz_id": taz_id,
             "ts_hour": (base + timedelta(hours=i)).strftime("%Y-%m-%d %H:%M:%S"),
             "occupancy": round(0.3 + 0.2 * ((i % 24) / 24), 4),
-            "load_kw_est": round(120 + 40 * ((i % 24) / 24), 2),
+            "load_kw_est": None,
         }
         for i in range(48)
     ]

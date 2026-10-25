@@ -202,3 +202,8 @@ def test_db_switch_follows_api_source(monkeypatch):
     monkeypatch.delenv("API_SOURCE")
     monkeypatch.setenv("MAP_DB", "mysql")
     assert appmod._db_on("MAP_DB")
+
+
+def test_series_load_not_fabricated(client):
+    pts = client.get("/api/zone/series?taz_id=1068").get_json()["data"]["points"]
+    assert all(p["load_kw_est"] is None for p in pts)
