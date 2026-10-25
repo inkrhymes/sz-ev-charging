@@ -6,24 +6,36 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-LAGS = (1, 2, 3, 24)
-ROLLS = (3, 24)
+LAGS = (1, 2, 3, 24, 168)
+ROLLS = (3, 24, 168)
 MIN_DAYS = 7
 FEATURES = ["hour", "dayofweek", "is_weekend", *[f"lag_{k}" for k in LAGS],
-            *[f"roll_mean_{w}" for w in ROLLS], "taz_id"]
+            *[f"roll_mean_{w}" for w in ROLLS], "diff_1", "same_hour_mean_4w", "taz_id"]
 
 
 def _from_parquet(path: Path) -> pd.DataFrame:
     """5 分钟站级 Parquet（按 dt=YYYY-MM-DD 分区）→ 片区小时。
-    需要列：station_id, ts, busy, total_piles, taz_id（缺 taz_id 时用同目录 station_info 补，不在此处理）。
-    occupancy = sum(busy)/sum(total_piles)，与 dwd_zone_hour.occupancy_avg 口径一致（按小时内均值）。"""
-    df = pd.read_parquet(path, columns=["station_id", "ts", "busy", "total_piles", "taz_id"])
-    df = df.dropna(subset=["busy", "total_piles"])
-    df = df[df["total_piles"] > 0]
-    df["ts"] = pd.to_datetime(df["ts"]).dt.floor("h")
-    df["occ"] = df["busy"] / df["total_piles"]
-    g = df.groupby(["taz_id", "ts"])["occ"].mean().rename("y").reset_index()
-    return g
+    逐个分区读取并立即聚合，内存只保留片区小时结果（全量 8768 万行也只占几十 MB）。
+    occupancy = 站点 busy/total_piles 在片区·小时内的均值；is_row_missing=1 的行不参与。"""
+    import pyarrow.parquet as pq
+    parts = sorted(path.glob("dt=*")) if path.is_dir() else []
+    files = parts if parts else [path]
+    out = []
+    for f in files:
+        ds = pq.ParquetDataset(f)
+        cols = ["taz_id", "ts", "busy", "total_piles"]
+        if "is_row_missing" in ds.schema.names:
+            cols.append("is_row_missing")
+        t = ds.read(columns=cols)
+        df = t.to_pandas()
+        if "is_row_missing" in df:
+            df = df[df["is_row_missing"] == 0]
+        df = df.dropna(subset=["busy", "total_piles"])
+        df = df[df["total_piles"] > 0]
+        df["ts"] = pd.to_datetime(df["ts"]).dt.floor("h")
+        df["occ"] = df["busy"] / df["total_piles"]
+        out.append(df.groupby(["taz_id", "ts"])["occ"].mean().rename("y").reset_index())
+    return pd.concat(out, ignore_index=True)
 
 
 def load_zone_hour(source: str | Path) -> pd.DataFrame:
@@ -59,6 +71,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         past = y.shift(1)
         for w in ROLLS:
             g[f"roll_mean_{w}"] = past.rolling(w, min_periods=1).mean()
+        g["diff_1"] = y.shift(1) - y.shift(2)
+        g["same_hour_mean_4w"] = pd.concat([y.shift(24 * 7 * k) for k in range(1, 5)], axis=1).mean(axis=1)
         out.append(g.reset_index())
     f = pd.concat(out, ignore_index=True)
     f["hour"] = f["ts"].dt.hour
@@ -68,7 +82,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return f.dropna(subset=["y", "lag_1"]).reset_index(drop=True)
 
 
-def time_split(f: pd.DataFrame, test_frac: float = 0.2):
+def time_split(f: pd.DataFrame, test_frac: float = 0.2, test_days: int | None = None):
     ts = np.sort(f["ts"].unique())
+    if test_days:
+        cut = pd.Timestamp(ts[-1]) - pd.Timedelta(days=test_days) + pd.Timedelta(hours=1)
+        return f[f["ts"] < cut], f[f["ts"] >= cut], cut
     cut = ts[int(len(ts) * (1 - test_frac))]
     return f[f["ts"] < cut], f[f["ts"] >= cut], pd.Timestamp(cut)
