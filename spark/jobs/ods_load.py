@@ -25,13 +25,15 @@ def load_station_info(spark, explicit: str | None) -> str:
     """
     cands = [Path(explicit)] if explicit else [STATION_INFO_LAKE, STATION_INFO_URBANEV, STATION_INFO_DEMO]
     for c in cands:
-        if c.is_dir() and any(c.glob("*.csv")):
-            path = str(c)
+        if c.is_dir() and any(c.glob("*.parquet")):
+            path, fmt = str(c), "parquet"
+        elif c.is_dir() and any(c.glob("*.csv")):
+            path, fmt = str(c), "csv"
         elif c.is_file():
-            path = str(c)
+            path, fmt = str(c), ("parquet" if c.suffix == ".parquet" else "csv")
         else:
             continue
-        df = spark.read.option("header", True).csv(path)
+        df = spark.read.parquet(path) if fmt == "parquet" else spark.read.option("header", True).csv(path)
         cols = set(df.columns)
         def pick(*names):
             for n in names:
@@ -57,7 +59,7 @@ def load_station_info(spark, explicit: str | None) -> str:
 def main() -> None:
     p = date_args(__doc__)
     p.add_argument("--station-info", default=None,
-                   help="站点维表 CSV；默认依次尝试 data/lake/ods/station_info/*.csv → UrbanEV station_information.csv → demo")
+                   help="站点维表 CSV；默认依次尝试 data/lake/ods/station_info/（Parquet 或 CSV）→ UrbanEV station_information.csv → demo")
     p.add_argument("--input", default=DEFAULT_ODS_INPUT, help="分区根目录（含 dt=YYYY-MM-DD 子目录）")
     a = p.parse_args()
     dates = resolve_dates(a)

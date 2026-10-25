@@ -23,7 +23,7 @@ PERF_LOG = SPARK_DIR / "_runs" / "perf.jsonl"
 
 def date_args(desc: str) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=desc)
-    p.add_argument("--dt", help="单日增量，YYYY-MM-DD")
+    p.add_argument("--dt", "--ds", dest="dt", help="单日增量，YYYY-MM-DD（--ds 为调度约定别名）")
     p.add_argument("--start", help="补跑起始日（含）")
     p.add_argument("--end", help="补跑结束日（含）")
     return p

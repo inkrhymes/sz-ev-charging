@@ -87,11 +87,15 @@ def build(spark, perf, dates, dl):
 
     t = time.time()
     spark.sql(f"""INSERT OVERWRITE TABLE ads.quality_summary
-      WITH s AS (SELECT station_id, SUM(rows) r, SUM(missing_rows) m, MAX(stuck_flag) st
-                 FROM dwd.quality_station_day GROUP BY station_id)
+      WITH w AS (SELECT station_id,
+                        CASE WHEN SUM(CASE WHEN is_row_missing=0 AND busy IS NOT NULL THEN 1 ELSE 0 END) >= 12
+                              AND COUNT(DISTINCT CASE WHEN is_row_missing=0 THEN busy END) = 1 THEN 1 ELSE 0 END st
+                 FROM dwd.station_5min_clean GROUP BY station_id),
+      s AS (SELECT q.station_id, SUM(q.rows) r, SUM(q.missing_rows) m, MAX(w.st) st
+                 FROM dwd.quality_station_day q JOIN w ON q.station_id=w.station_id GROUP BY q.station_id)
       SELECT 'station_cnt', CAST(COUNT(*) AS DOUBLE), '已入仓站点数' FROM s
       UNION ALL SELECT 'row_missing_rate', SUM(m)/SUM(r), '整行缺数比例（按行加权，全部已入仓分区）' FROM s
-      UNION ALL SELECT 'stuck_station_cnt', CAST(SUM(st) AS DOUBLE), '至少一天读数不动的站' FROM s
+      UNION ALL SELECT 'stuck_station_cnt', CAST(SUM(st) AS DOUBLE), '整个已入仓窗口内读数不动的站（口径同 etl/clean_to_dwd.py）' FROM s
       UNION ALL SELECT 'high_missing_station_cnt', CAST(SUM(CASE WHEN m/r > {HIGH_MISSING_THR} THEN 1 ELSE 0 END) AS DOUBLE),
                        '缺数比例>30% 的站' FROM s""")
     perf.step("quality_summary", spark.table("ads.quality_summary").count(), t)
