@@ -4,6 +4,11 @@
 主数据：UrbanEV 站点级 5 分钟原始（演示子集 20～30 站，含卡死/高缺失）；辅：片区天气（Open-Meteo）、节假日表。  
 负责人：小黑。命名约定：`ods_` 贴源、`dwd_` 清洗明细、`ads_` 指标宽表；时间统一 `Asia/Shanghai`。
 
+
+## 0. 演示子集锁定
+
+站列表已固化：`data/demo/demo_station_ids.txt` + `demo_station_list.csv`（含卡死/高缺失角色）。选取规则见 `docs/demo_subset_rules.txt`。后续 ODS 只导入这些站。
+
 ## 1. ODS（贴源，尽量不改语义）
 
 | 表名 | 字段 | 类型 | 说明 | 来源 |
