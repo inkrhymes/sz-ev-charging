@@ -2,15 +2,298 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>深圳充电站运行管理可视化（骨架）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>深圳充电站运行管理可视化（演示）</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   <style>
-    body { font-family: sans-serif; margin: 2rem; background: #0b1220; color: #e8eefc; }
-    #chart { width: 100%; height: 420px; border: 1px dashed #334; }
+    :root { --bg:#0b1220; --card:#121a2b; --line:#243044; --text:#e8eefc; --muted:#8b9bb8; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    header { display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:1px solid var(--line); }
+    header h1 { margin:0; font-size:18px; font-weight:600; }
+    .meta { color:var(--muted); font-size:12px; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#1e293b; color:var(--muted); font-size:11px; margin-left:8px; }
+    .badge.live { color:#86efac; background:#14532d; }
+    .badge.mock { color:#fde68a; background:#78350f; }
+    main { padding:16px 20px 28px; display:grid; gap:14px; }
+    .kpis { display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:10px; }
+    .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+    .kpi .label { color:var(--muted); font-size:12px; }
+    .kpi .value { font-size:22px; font-weight:700; margin-top:4px; }
+    .row { display:grid; grid-template-columns:1.4fr 1fr; gap:14px; }
+    .row3 { display:grid; grid-template-columns:1.2fr 1fr 0.9fr; gap:14px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; min-height:280px; }
+    .card h2 { margin:0 0 8px; font-size:14px; font-weight:600; color:var(--muted); }
+    .chart { width:100%; height:240px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:500; }
+    button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:11px; }
+    button:disabled { opacity:.4; cursor:not-allowed; }
+    select, input { background:#0f172a; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 8px; font-size:12px; }
+    .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+    @media (max-width:1100px) {
+      .kpis, .row, .row3 { grid-template-columns:1fr 1fr; }
+    }
   </style>
 </head>
 <body>
-  <h1>深圳充电站运行管理可视化（占位）</h1>
-  <p>ECharts 大屏由小黄接入；先保证能静态打开本页。</p>
-  <div id="chart">图表占位</div>
+  <header>
+    <div>
+      <h1>深圳市电动汽车充电站运行管理可视化 <span id="modeBadge" class="badge mock">MOCK</span></h1>
+      <div class="meta">对齐开题六模块薄皮 · overview / zone / quality / baseline / tickets</div>
+    </div>
+    <div class="toolbar">
+      <label class="meta">片区
+        <select id="zoneSelect">
+          <option value="demo_zone_1">demo_zone_1</option>
+          <option value="demo_zone_2">demo_zone_2</option>
+        </select>
+      </label>
+      <button id="btnRefresh">刷新</button>
+      <span id="apiHint" class="meta"></span>
+    </div>
+  </header>
+  <main>
+    <section class="kpis" id="kpis"></section>
+    <section class="row">
+      <div class="card"><h2>片区占用率时序</h2><div id="chartSeries" class="chart"></div></div>
+      <div class="card"><h2>质检数字</h2><div id="chartQuality" class="chart"></div></div>
+    </section>
+    <section class="row3">
+      <div class="card"><h2>上一时刻 naive 基线对比</h2><div id="chartBaseline" class="chart"></div></div>
+      <div class="card">
+        <h2>运维工单 stub</h2>
+        <table>
+          <thead><tr><th>ID</th><th>站点</th><th>类型</th><th>状态</th><th></th></tr></thead>
+          <tbody id="ticketBody"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>只读登录 stub</h2>
+        <div class="toolbar">
+          <input id="userInput" value="demo" style="width:90px" />
+          <select id="roleSelect"><option value="readonly">readonly</option><option value="admin">admin</option></select>
+          <button id="btnLogin">登录</button>
+        </div>
+        <pre id="loginOut" class="meta" style="white-space:pre-wrap"></pre>
+      </div>
+    </section>
+  </main>
+  <script>
+    const API_BASE = localStorage.getItem("API_BASE") || "http://127.0.0.1:5000";
+    const FALLBACK = {
+      overview: { dt: "2022-09-01", station_cnt: 25, zone_cnt: 23, avg_occupancy: 0.42, peak_hour: 19, stuck_cnt: 4, high_missing_cnt: 6 },
+      series: (() => {
+        const points = [];
+        for (let i = 0; i < 48; i++) {
+          points.push({
+            ts_hour: `2022-09-0${1 + Math.floor(i/24)} ${String(i%24).padStart(2,"0")}:00:00`,
+            occupancy: +(0.3 + 0.2 * ((i % 24) / 24)).toFixed(4),
+            load_kw_est: +(120 + 40 * ((i % 24) / 24)).toFixed(2),
+          });
+        }
+        return { taz_id: "demo_zone_1", points };
+      })(),
+      quality: [
+        { metric: "row_missing_rate", value: 0.2642, note: "25站14天窗实测" },
+        { metric: "stuck_station_cnt", value: 4, note: "演示子集实测" },
+        { metric: "high_missing_station_cnt", value: 6, note: "missing_rate>0.30" },
+        { metric: "demo_station_cnt", value: 25, note: "演示子集站数" },
+      ],
+      baseline: (() => {
+        const points = []; let prev = 0.35;
+        for (let i = 0; i < 24; i++) {
+          const y = +(0.35 + 0.15 * ((i % 12) / 12)).toFixed(4);
+          points.push({ ts_hour: `2022-09-01 ${String(i).padStart(2,"0")}:00:00`, y_true: y, y_hat_lag1: prev, abs_err: +Math.abs(y-prev).toFixed(4) });
+          prev = y;
+        }
+        return { taz_id: "demo_zone_1", points };
+      })(),
+      tickets: [
+        { ticket_id: 1, station_id: "1554", type: "repair", status: "open" },
+        { ticket_id: 2, station_id: "1334", type: "repair", status: "open" },
+        { ticket_id: 3, station_id: "1010", type: "inspect", status: "open" },
+        { ticket_id: 4, station_id: "1919", type: "inspect", status: "processing" },
+      ],
+    };
+
+    let usingMock = true;
+    const chartSeries = echarts.init(document.getElementById("chartSeries"));
+    const chartQuality = echarts.init(document.getElementById("chartQuality"));
+    const chartBaseline = echarts.init(document.getElementById("chartBaseline"));
+
+    async function apiGet(path) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 2500);
+      try {
+        const res = await fetch(`${API_BASE}${path}`, { signal: ctrl.signal });
+        clearTimeout(t);
+        if (!res.ok) throw new Error(res.statusText);
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "api error");
+        return json.data;
+      } catch (e) {
+        clearTimeout(t);
+        throw e;
+      }
+    }
+
+    function renderKpis(o) {
+      const items = [
+        ["演示站数", o.station_cnt],
+        ["片区数", o.zone_cnt],
+        ["日均占用率", ((o.avg_occupancy || 0) * 100).toFixed(1) + "%"],
+        ["高峰小时", o.peak_hour + ":00"],
+        ["卡死站", o.stuck_cnt],
+        ["高缺失站", o.high_missing_cnt],
+      ];
+      document.getElementById("kpis").innerHTML = items.map(([l,v]) =>
+        `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`
+      ).join("");
+    }
+
+    function renderSeries(data) {
+      const pts = data.points || [];
+      chartSeries.setOption({
+        backgroundColor: "transparent",
+        tooltip: { trigger: "axis" },
+        legend: { data: ["占用率", "估算负荷kW"], textStyle: { color: "#8b9bb8" } },
+        grid: { left: 48, right: 48, top: 36, bottom: 28 },
+        xAxis: { type: "category", data: pts.map(p => p.ts_hour.slice(5, 16)), axisLabel: { color: "#8b9bb8" } },
+        yAxis: [
+          { type: "value", name: "占用率", min: 0, max: 1, axisLabel: { color: "#8b9bb8" }, splitLine: { lineStyle: { color: "#243044" } } },
+          { type: "value", name: "kW", axisLabel: { color: "#8b9bb8" }, splitLine: { show: false } },
+        ],
+        series: [
+          { name: "占用率", type: "line", smooth: true, data: pts.map(p => p.occupancy), showSymbol: false, itemStyle: { color: "#3b82f6" } },
+          { name: "估算负荷kW", type: "line", yAxisIndex: 1, smooth: true, data: pts.map(p => p.load_kw_est), showSymbol: false, itemStyle: { color: "#22c55e" } },
+        ],
+      });
+    }
+
+    function renderQuality(rows) {
+      chartQuality.setOption({
+        backgroundColor: "transparent",
+        tooltip: { trigger: "axis" },
+        grid: { left: 120, right: 24, top: 16, bottom: 24 },
+        xAxis: { type: "value", axisLabel: { color: "#8b9bb8" }, splitLine: { lineStyle: { color: "#243044" } } },
+        yAxis: { type: "category", data: rows.map(r => r.metric), axisLabel: { color: "#8b9bb8" } },
+        series: [{
+          type: "bar",
+          data: rows.map(r => typeof r.value === "number" && r.value <= 1 && String(r.metric).includes("rate") ? +(r.value * 100).toFixed(1) : r.value),
+          itemStyle: { color: "#f59e0b" },
+          label: { show: true, position: "right", color: "#e8eefc" },
+        }],
+      });
+    }
+
+    function renderBaseline(data) {
+      const pts = data.points || [];
+      chartBaseline.setOption({
+        backgroundColor: "transparent",
+        tooltip: { trigger: "axis" },
+        legend: { data: ["真实占用", "lag1 预测"], textStyle: { color: "#8b9bb8" } },
+        grid: { left: 40, right: 16, top: 36, bottom: 28 },
+        xAxis: { type: "category", data: pts.map(p => p.ts_hour.slice(11, 16)), axisLabel: { color: "#8b9bb8" } },
+        yAxis: { type: "value", min: 0, max: 1, axisLabel: { color: "#8b9bb8" }, splitLine: { lineStyle: { color: "#243044" } } },
+        series: [
+          { name: "真实占用", type: "line", data: pts.map(p => p.y_true), showSymbol: false, itemStyle: { color: "#e8eefc" } },
+          { name: "lag1 预测", type: "line", data: pts.map(p => p.y_hat_lag1), showSymbol: false, lineStyle: { type: "dashed" }, itemStyle: { color: "#a78bfa" } },
+        ],
+      });
+    }
+
+    function renderTickets(list) {
+      const body = document.getElementById("ticketBody");
+      body.innerHTML = (list || []).map(t => `
+        <tr>
+          <td>${t.ticket_id}</td>
+          <td>${t.station_id}</td>
+          <td>${t.type}</td>
+          <td>${t.status}</td>
+          <td><button data-id="${t.ticket_id}" ${t.status === "done" ? "disabled" : ""}>下一状态</button></td>
+        </tr>`).join("");
+      body.querySelectorAll("button[data-id]").forEach(btn => {
+        btn.onclick = () => advanceTicket(+btn.dataset.id, list);
+      });
+    }
+
+    async function advanceTicket(id, list) {
+      const cur = list.find(t => t.ticket_id === id);
+      if (!cur) return;
+      const next = cur.status === "open" ? "processing" : cur.status === "processing" ? "done" : "done";
+      try {
+        if (!usingMock) {
+          const res = await fetch(`${API_BASE}/api/tickets/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: next }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.error);
+        } else {
+          cur.status = next;
+        }
+      } catch (e) {
+        cur.status = next; // offline demo still works
+      }
+      renderTickets(list);
+    }
+
+    async function loadAll() {
+      const taz = document.getElementById("zoneSelect").value;
+      let overview, series, quality, baseline, tickets;
+      try {
+        overview = await apiGet(`/api/overview?dt=2022-09-01`);
+        series = await apiGet(`/api/zone/series?taz_id=${encodeURIComponent(taz)}`);
+        quality = await apiGet(`/api/quality`);
+        baseline = await apiGet(`/api/baseline?taz_id=${encodeURIComponent(taz)}`);
+        tickets = await apiGet(`/api/tickets`);
+        usingMock = false;
+        document.getElementById("modeBadge").textContent = "LIVE API";
+        document.getElementById("modeBadge").className = "badge live";
+        document.getElementById("apiHint").textContent = API_BASE;
+      } catch (e) {
+        usingMock = true;
+        overview = FALLBACK.overview;
+        series = { ...FALLBACK.series, taz_id: taz };
+        quality = FALLBACK.quality;
+        baseline = { ...FALLBACK.baseline, taz_id: taz };
+        tickets = JSON.parse(JSON.stringify(FALLBACK.tickets));
+        document.getElementById("modeBadge").textContent = "本地假数据";
+        document.getElementById("modeBadge").className = "badge mock";
+        document.getElementById("apiHint").textContent = `API 未通，已回落假数据（${e.message || e}）`;
+      }
+      renderKpis(overview);
+      renderSeries(series);
+      renderQuality(quality);
+      renderBaseline(baseline);
+      renderTickets(tickets);
+      window.__tickets = tickets;
+    }
+
+    document.getElementById("btnRefresh").onclick = loadAll;
+    document.getElementById("zoneSelect").onchange = loadAll;
+    document.getElementById("btnLogin").onclick = async () => {
+      const user = document.getElementById("userInput").value;
+      const role = document.getElementById("roleSelect").value;
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user, role }),
+        });
+        const json = await res.json();
+        document.getElementById("loginOut").textContent = JSON.stringify(json, null, 2);
+      } catch (e) {
+        document.getElementById("loginOut").textContent = JSON.stringify({ ok: true, data: { user, role, token: `demo-${role}` }, note: "offline stub" }, null, 2);
+      }
+    };
+    window.addEventListener("resize", () => {
+      chartSeries.resize(); chartQuality.resize(); chartBaseline.resize();
+    });
+    loadAll();
+  </script>
 </body>
 </html>
