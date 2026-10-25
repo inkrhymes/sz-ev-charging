@@ -5,8 +5,12 @@ __pycache__/
 venv/
 node_modules/
 data/raw/
+# demo: track station lists only; ignore bulky extracts
 data/demo/**
 !data/demo/.gitkeep
+!data/demo/README.md
+!data/demo/demo_station_ids.txt
+!data/demo/demo_station_list.csv
 *.mp4
 .DS_Store
 mysql_data/
