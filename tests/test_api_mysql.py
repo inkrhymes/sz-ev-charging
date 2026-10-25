@@ -153,3 +153,20 @@ def test_data_range_file(app_mod, monkeypatch):
     monkeypatch.setenv("API_SOURCE", "file")
     d = data(app_mod.app.test_client().get("/api/data_range"))
     assert d["from"] <= d["to"] and d["from"].startswith("2022-")
+
+
+def test_map_hourly_mysql(app_mod, monkeypatch):
+    rows = [{"taz_id": 11, "ts_hour": dt.datetime(2022, 9, 1, 0), "occupancy": Decimal("0.5")},
+            {"taz_id": 11, "ts_hour": dt.datetime(2022, 9, 1, 18), "occupancy": Decimal("0.33")}]
+    monkeypatch.setattr(app_mod, "_sql", lambda q, a=(): rows if "ads_zone_occupancy_hour" in q else [])
+    d = data(app_mod.app.test_client().get("/api/map/hourly?date=2022-09-01"))
+    v = d["zones"]["11"]
+    assert d["date"] == "2022-09-01" and len(v) == 24 and v[0] == 0.5 and v[18] == 0.33 and v[1] is None
+
+
+def test_map_hourly_file_and_bad_date(app_mod, monkeypatch):
+    monkeypatch.setenv("API_SOURCE", "file")
+    c = app_mod.app.test_client()
+    d = data(c.get("/api/map/hourly?date=2022-09-01"))
+    assert d["zones"] and all(len(v) == 24 for v in d["zones"].values())
+    assert c.get("/api/map/hourly?date=bad").status_code == 400

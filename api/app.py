@@ -1066,6 +1066,32 @@ def alerts_patch(alert_id):
     return ok(a) if a else err("alert not found", 404)
 
 
+@app.get("/api/map/hourly")
+def map_hourly():
+    """地图时间轴：某一天每个片区 0–23 点的占用率（只读）。返回 {date, zones: {taz_id: [24 个值或 null]}}。"""
+    day = (request.args.get("date") or "2022-09-01")[:10]
+    try:
+        d0 = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return err("date must be YYYY-MM-DD")
+    out = defaultdict(lambda: [None] * 24)
+    rows = None
+    if use_mysql():
+        rows = _sql("SELECT taz_id, ts_hour, occupancy FROM ads_zone_occupancy_hour WHERE ts_hour >= %s AND ts_hour < %s",
+                    (d0.strftime("%Y-%m-%d 00:00:00"), (d0 + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")))
+        for r in rows or []:
+            out[str(r["taz_id"])][int(_ts(r["ts_hour"])[11:13])] = _num(r["occupancy"], 4)
+    if not rows and use_file():
+        try:
+            for r in _zone_rows():
+                if r["ts_hour"][:10] == day:
+                    v = r.get("occupancy_avg")
+                    out[str(r["taz_id"])][int(r["ts_hour"][11:13])] = round(float(v), 4) if v not in (None, "") else None
+        except OSError:
+            pass
+    return ok({"date": day, "zones": dict(out)})
+
+
 # 必须放在文件末尾：python app.py 时 app.run() 会阻塞，写在它后面的路由（地图、告警）不会注册。
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -282,7 +282,16 @@
     <section class="view" id="view-map">
       <div class="grid">
         <div class="card col-16"><div class="card-head"><div class="card-title">深圳片区分布<span class="tip" data-tip="圆点位置是片区内各站的平均经纬度，颜色越深越忙，圆越大桩越多"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="mapExtra"></div></div>
-          <div class="card-body"><div id="chartMap" style="height:460px"></div></div></div>
+          <div class="card-body">
+            <div id="mapTimeBar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;color:var(--text-2)">
+              <span>日期</span><input type="date" id="mapDate" value="2022-09-01" min="2022-09-01" max="2023-02-28" />
+              <span>时间</span><input type="range" id="mapHour" min="0" max="23" step="1" value="18" style="width:220px" />
+              <b id="mapHourText" class="num" style="min-width:44px">18:00</b>
+              <button class="btn" id="mapPlay" type="button">播放</button>
+              <a id="mapAllDay">看全天平均</a>
+              <span id="mapTimeHint" style="color:var(--text-3)"></span>
+            </div>
+            <div id="chartMap" style="height:460px"></div></div></div>
         <div class="card col-8"><div class="card-head"><div class="card-title">最忙的片区</div></div>
           <div class="card-body"><table><thead><tr><th>片区</th><th class="num">站数</th><th class="num">平均占用率</th></tr></thead><tbody id="mapRank"></tbody></table></div></div>
       </div>
@@ -804,7 +813,7 @@
       const z = mapData.zones;
       $("mapExtra").textContent = `${z.length} 个片区 · ${mapData.stationTotal || "—"} 个站` + (mapData.offline ? " · 离线样例" : "");
       charts.chartMap.setOption({
-        tooltip: { trigger: "item", formatter: p => { const d = p.data.raw; return `片区 ${d.taz_id}<br>站数 ${d.station_count}，桩数 ${d.total_piles}<br>平均占用率 ${d.avg_occupancy == null ? "暂无数据" : pct(d.avg_occupancy)}`; } },
+        tooltip: { trigger: "item", formatter: p => { const d = p.data.raw; return `片区 ${d.taz_id}<br>站数 ${d.station_count}，桩数 ${d.total_piles}<br>${mapHourOn ? "这一小时占用率" : "平均占用率"} ${d.avg_occupancy == null ? "暂无数据" : pct(d.avg_occupancy)}`; } },
         grid: { left: 56, right: 24, top: 24, bottom: 40 },
         xAxis: { type: "value", scale: true, name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { formatter: v => v.toFixed(2) } },
         yAxis: { type: "value", scale: true, name: "纬度", axisLabel: { formatter: v => v.toFixed(2) } },
@@ -816,7 +825,37 @@
       $("mapRank").innerHTML = ranked.map(d => `<tr><td><a data-z="${d.taz_id}">片区 ${d.taz_id}</a></td><td class="num">${d.station_count}</td><td class="num">${pct(d.avg_occupancy)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">暂无数据</td></tr>`;
       $("mapRank").querySelectorAll("a[data-z]").forEach(a => a.onclick = () => pickZone(a.dataset.z));
       pickZone(mapZone);
+      recolorMap();
     }
+    /* 地图时间轴：选日期和小时，按那一小时的占用率给片区上色；「看全天平均」回到原来的颜色 */
+    let mapHourly = null, mapHourOn = false, mapTimer = null;
+    async function loadMapHourly() {
+      const d = $("mapDate").value;
+      try { mapHourly = await apiGet(`/api/map/hourly?date=${d}`); } catch (e) { mapHourly = null; }
+      mapHourOn = true; recolorMap();
+    }
+    function recolorMap() {
+      if (!mapData || !mapData.zones) return;
+      const h = +$("mapHour").value;
+      $("mapHourText").textContent = String(h).padStart(2, "0") + ":00";
+      const hz = (mapHourly && mapHourly.zones) || {};
+      const has = Object.keys(hz).length > 0;
+      $("mapTimeHint").textContent = !mapHourOn ? "现在是全天平均" : has ? `${$("mapDate").value} ${String(h).padStart(2, "0")}:00 各片区占用率` : "这一天没有按小时的数据";
+      const occ = d => mapHourOn ? ((hz[String(d.taz_id)] || [])[h] ?? null) : d.avg_occupancy;
+      charts.chartMap.setOption({ series: [{ data: mapData.zones.map(d => { const o = occ(d); return { value: [d.lon, d.lat], raw: { ...d, avg_occupancy: o }, itemStyle: { color: occColor(o), opacity: .85 } }; }) }, {}] });
+    }
+    $("mapHour").oninput = () => mapHourOn && mapHourly ? recolorMap() : loadMapHourly();
+    $("mapDate").onchange = loadMapHourly;
+    $("mapAllDay").onclick = () => { stopMapPlay(); mapHourOn = false; recolorMap(); };
+    function stopMapPlay() { clearInterval(mapTimer); mapTimer = null; $("mapPlay").textContent = "播放"; }
+    $("mapPlay").onclick = async () => {
+      if (mapTimer) return stopMapPlay();
+      if (!mapHourOn || !mapHourly) await loadMapHourly();
+      $("mapPlay").textContent = "暂停";
+      mapTimer = setInterval(() => { const el = $("mapHour"); el.value = (+el.value + 1) % 24; recolorMap(); }, 800);
+    };
+    document.addEventListener("visibilitychange", () => { if (document.hidden) stopMapPlay(); });
+
     async function pickZone(z) {
       mapZone = z || "";
       if (mapZone && mapData.partial && !mapData.stations.some(s => s.taz_id === mapZone)) mapData.stations.push(...await fetchZoneStations(mapZone));
