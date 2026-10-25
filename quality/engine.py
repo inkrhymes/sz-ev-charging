@@ -23,6 +23,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 RULES_DIR = Path(__file__).resolve().parent / "rules"
 DDL = Path(__file__).resolve().parent / "sql" / "dq_run_log.sql"
+ALERT_DDL = Path(__file__).resolve().parent / "sql" / "dq_alert.sql"
 
 
 class DQBlockError(RuntimeError):
@@ -181,14 +182,58 @@ def _connect():
     return pymysql.connect(
         host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
         user=os.getenv("MYSQL_USER", "root"), password=os.getenv("MYSQL_PASSWORD", "rootpass"),
-        database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", autocommit=True)
+        database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", autocommit=True,
+        client_flag=pymysql.constants.CLIENT.FOUND_ROWS)
+
+
+def _num(x):
+    try:
+        return float(str(x).split()[0].rstrip("%")) / (100 if str(x).split()[0].endswith("%") else 1)
+    except (ValueError, IndexError):
+        return None
+
+
+def _threshold(rule):
+    for k in ("min", "max", "max_groups", "max_ratio", "max_violations"):
+        if rule.get(k) is not None:
+            return float(rule[k])
+    return 0.0 if rule["type"] == "duplicate_key" else None
+
+
+def _ddl(path):
+    sql = path.read_text(encoding="utf-8")
+    return sql[sql.index("CREATE"):].rstrip().rstrip(";")
+
+
+def write_alerts(results, layer, ds, rules):
+    """未通过的规则写入 dq_alert；同一 ds/层/规则已有告警则只刷新数值，不重置处理状态。"""
+    bad = [r for r in results if not r.passed]
+    if not bad:
+        return 0
+    by_name = {r["name"]: r for r in rules}
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_ddl(ALERT_DDL))
+            for r in bad:
+                lvl = "阻断" if r.severity == "block" else "告警"
+                detail = f"[{lvl}] {ds} {layer} 层规则 {r.rule_name} 未通过：实测 {r.actual}，要求 {r.expected}。{r.message}"[:500]
+                args = (_num(r.actual), _threshold(by_name.get(r.rule_name, {"type": ""})), detail)
+                n = cur.execute("UPDATE dq_alert SET metric_value=%s, threshold=%s, detail=%s WHERE ds=%s AND layer=%s"
+                                " AND rule_name=%s AND station_id IS NULL", (*args, ds, layer, r.rule_name))
+                if not n:
+                    cur.execute("INSERT INTO dq_alert (ds,layer,rule_name,severity,metric_value,threshold,detail)"
+                                " VALUES (%s,%s,%s,%s,%s,%s,%s)", (ds, layer, r.rule_name, r.severity, *args))
+    finally:
+        conn.close()
+    return len(bad)
 
 
 def write_log(results, layer, ds, run_id):
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            cur.execute(DDL.read_text(encoding="utf-8").split(";")[0].split("\n", 1)[1])
+            cur.execute(_ddl(DDL))
             cur.executemany(
                 "INSERT INTO dq_run_log (run_id,ds,layer,rule_name,rule_type,severity,passed,actual,expected,message)"
                 " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -201,13 +246,15 @@ def write_log(results, layer, ds, run_id):
 def check(layer, ds, df, prev_df=None, write_db=True, run_id=None, rules_dir=RULES_DIR, log=print):
     """执行规则、记录日志；block 失败抛 DQBlockError。返回结果列表。"""
     run_id = run_id or f"{layer}-{ds}-{uuid.uuid4().hex[:8]}"
-    results = run_rules(df, load_rules(layer, rules_dir), ds=ds, prev_df=prev_df)
+    rules = load_rules(layer, rules_dir)
+    results = run_rules(df, rules, ds=ds, prev_df=prev_df)
     for r in results:
         tag = "PASS" if r.passed else ("BLOCK" if r.severity == "block" else "WARN")
         log(f"[dq:{layer}:{ds}] {tag:5} {r.rule_name} actual={r.actual} expected={r.expected} {r.message}")
     if write_db:
         try:
             write_log(results, layer, ds, run_id)
+            write_alerts(results, layer, ds, rules)
         except Exception as e:
             log(f"[dq] 写 dq_run_log 失败（不影响判定）: {e}")
     failed = [r for r in results if not r.passed and r.severity == "block"]
