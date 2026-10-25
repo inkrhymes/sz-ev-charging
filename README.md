@@ -37,7 +37,7 @@
 
 - **数据窗：** 2022-09-01 00:00 ～ 2022-09-14 23:55（5 分钟粒度）
 - **站点：** 25 个（见 `data/demo/demo_station_ids.txt`，禁止另行编造站号）
-- **片区（TAZ）：** 23
+- **片区（TAZ）：** 23（其中 18 个有有效时序）
 - **行数：** 100,800
 
 | 指标 | 实测值 |
@@ -75,15 +75,10 @@ cp .env.example .env
 ### 4.3 一键启动（推荐）
 
 ```bash
-# 建议先准备虚拟环境（start.sh 中装载步骤会调用 .venv/bin/python）
-python3 -m venv .venv
-.venv/bin/pip install -r etl/requirements.txt -r api/requirements.txt
-
-chmod +x scripts/start.sh scripts/stop.sh
-./scripts/start.sh
+bash scripts/start.sh   # Windows 请在 Git Bash 或 WSL 中执行
 ```
 
-脚本依次完成：启动 MySQL → 按 ods/dwd/ads 执行建表 SQL →（如缺文件则触发 ETL）装载演示 CSV 并回填 ads → 构建并启动 API。
+脚本会自动创建 `.venv` 并安装依赖、解压仓库内的压缩演示数据，然后依次完成：启动 MySQL → 按 ods/dwd/ads 执行建表 SQL →（如缺文件则触发 ETL）装载演示 CSV 并回填 ads → 构建并启动 API。
 
 验收探针示例：
 
@@ -92,7 +87,7 @@ curl -s http://localhost:5000/api/health
 curl -s 'http://localhost:5000/api/overview'
 ```
 
-大屏页面：浏览器打开仓库内 `web/index.html`，或通过 API 容器已挂载的静态资源访问（以当前 Compose 配置为准）。
+大屏页面：浏览器打开 http://localhost:5000/ 。脚本可重复执行，无需先清数据卷。验收清单见 `docs/acceptance_checklist.md`（34 项）。
 
 ### 4.4 停止
 

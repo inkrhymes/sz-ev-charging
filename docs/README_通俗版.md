@@ -35,21 +35,19 @@
 
 ## 你怎么自己跑起来看
 
-电脑先装好 Docker，然后：
+电脑先装好 Docker 和 Python 3.10+（Windows 用 Git Bash 跑），然后：
 
 ```bash
 git clone https://github.com/inkrhymes/sz-ev-charging.git
 cd sz-ev-charging
 cp .env.example .env
-python3 -m venv .venv
-.venv/bin/pip install -r etl/requirements.txt -r api/requirements.txt
-./scripts/start.sh
+bash scripts/start.sh
 ```
 
 跑完后打开：
 - 探活：http://localhost:5000/api/health
 - 总览：http://localhost:5000/api/overview
-- 大屏：仓库里的 `web/index.html`
+- 大屏：http://localhost:5000/
 
 关掉：`./scripts/stop.sh`  
 连数据库文件一起清：`./scripts/stop.sh --purge`
@@ -60,7 +58,8 @@ python3 -m venv .venv
 
 | 项 | 数 |
 |----|----|
-| 站点 / 片区 | 25 / 23 |
+| 站点 / 片区 | 25 / 23（18 个有有效时序） |
+| 验收项 | 34 项全部通过 |
 | 时间窗 | 2022-09-01～09-14 |
 | 行数 | 100,800 |
 | 整行缺失率 | 26.42% |
@@ -68,10 +67,6 @@ python3 -m venv .venv
 
 ---
 
-## 现在还没做完的（对外别说「全验收完了」）
+## 现在还差的
 
-1. 正式录屏视频（口播稿有了，片子还没有）
-2. 整包拷到你自己的电脑（电脑上线后再传）
-3. 简历里「部署」那句，等联调口径定了再补
-
-有问题直接在「项目履历」群里 @ 对应模块的人，或私聊我。
+只差一件：workpc 上线后把整包拷到你电脑上，并在你电脑上跑一遍。录屏、验收清单、简历描述都已完成。
