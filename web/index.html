@@ -110,6 +110,13 @@
     td { height:48px; padding:0 16px; border-bottom:1px solid var(--border); color:var(--text-2); }
     tbody tr:hover td { background:var(--fill-1); }
     th.num, td.num { text-align:right; }
+    th.sortable { cursor:pointer; user-select:none; } th.sortable:hover { color:var(--primary-6); }
+    .sort-ic { display:inline-block; margin-left:4px; color:var(--text-4); font-size:10px; } .sort-ic.on { color:var(--primary-6); }
+    .bar-cell { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+    .bar-cell i { display:inline-block; width:60px; height:4px; background:var(--fill-2); border-radius:2px; overflow:hidden; }
+    .bar-cell i b { display:block; height:100%; background:var(--primary-6); }
+    .sub-filter { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 20px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+    .sub-filter .tabs { margin:0; border-bottom:0; }
     .empty { text-align:center; color:var(--text-3); height:96px; }
     .tag { display:inline-flex; align-items:center; height:24px; padding:0 8px; border-radius:2px; font-size:12px; white-space:nowrap; }
     .tag.danger { background:var(--danger-1); color:var(--danger-6); }
@@ -144,7 +151,7 @@
     .toast { position:fixed; top:76px; left:50%; transform:translateX(-50%); background:var(--bg-white); border:1px solid var(--border); box-shadow:0 4px 10px rgba(0,0,0,.1);
              border-radius:4px; padding:8px 16px; display:none; z-index:60; }
 
-    @media (max-width:1439px) { .kpis6 > .col-4 { grid-column:span 6; } }
+    @media (max-width:1439px) { .kpis6 > .col-4 { grid-column:span 8; } }
     @media (max-width:1100px) { .grid > .col-12, .grid > .col-16, .grid > .col-8 { grid-column:span 24; } .kpis6 > .col-4 { grid-column:span 8; } }
     @media (max-width:640px) { .grid > [class*="col-"] { grid-column:span 24 !important; } .top-right .hide-sm { display:none; } }
   </style>
@@ -207,6 +214,8 @@
         <div class="card col-8"><div class="card-head"><div class="card-title">工单概况<span class="tip" data-tip="由数据质量异常自动生成的巡检与维修工单"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="tickets">查看全部</a></div>
           <div class="card-body"><div class="stat-list" id="ticketStat"></div><div id="chartTicket" class="chart-sub" style="height:236px"></div></div></div>
       </div>
+      <div class="card"><div class="card-head"><div class="card-title">待关注站点<span class="tip" data-tip="质检判定为卡死或高缺失、建议生成工单的站点"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="quality">查看质检明细</a></div>
+        <div class="card-body"><table><thead><tr><th>站点</th><th>片区</th><th>问题类型</th><th class="num">缺失率</th><th class="num">最长断档（天）</th><th>建议工单</th></tr></thead><tbody id="ovStationBody"></tbody></table></div></div>
     </section>
 
     <!-- 片区分析 -->
@@ -245,8 +254,14 @@
       <div class="grid" id="qualityKpis"></div>
       <div class="card"><div class="card-head"><div class="card-title">质检指标明细<span class="tip" data-tip="来自数据质检报告，窗口内全部样本站统计"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
         <div class="card-body"><table><thead><tr><th>指标</th><th class="num">数值</th><th>统计口径</th><th>判定</th></tr></thead><tbody id="qualityBody"></tbody></table></div></div>
-      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">异常站点</div></div>
-        <div class="card-body"><table><thead><tr><th>站点</th><th>片区</th><th>问题类型</th><th class="num">缺失率</th></tr></thead><tbody id="stationBody"></tbody></table></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">站点质检明细<span class="tip" data-tip="窗口内每个站点的占用、电量与缺失情况；占用率排名按全部站点从高到低"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="stationExtra"></div></div>
+        <div class="sub-filter" style="margin-top:8px"><div class="tabs" id="stationTabs"></div>
+          <div class="f" style="display:flex;align-items:center;gap:8px;color:var(--text-2)">片区<select id="stationZone" style="width:140px"><option value="">全部片区</option></select></div></div>
+        <div class="card-body"><table><thead><tr><th>站点</th><th>片区</th><th class="num">桩数</th>
+          <th class="num sortable" data-sort="avg_occupancy">平均占用率<span class="sort-ic" data-ic="avg_occupancy"></span></th><th class="num">占用排名</th>
+          <th class="num sortable" data-sort="total_volume_kwh">累计电量（kWh）<span class="sort-ic" data-ic="total_volume_kwh"></span></th>
+          <th class="num sortable" data-sort="missing_rate">缺失率<span class="sort-ic" data-ic="missing_rate"></span></th><th class="num">最长断档（天）</th><th>状态</th><th>建议工单</th></tr></thead>
+          <tbody id="stationBody"></tbody></table><div class="pager" id="stationPager"></div></div></div>
     </section>
 
     <!-- 运维工单 -->
@@ -387,6 +402,12 @@
     }
 
     function occAxis(extra) { return Object.assign({ type: "value", min: 0, max: 1, axisLabel: { formatter: pct } }, extra); }
+    // 趋势图按数据自适应纵轴，避免小幅波动被压成直线
+    function autoOccAxis(extra) {
+      return Object.assign({ type: "value", scale: true, axisLabel: { formatter: pct },
+        min: v => Math.max(0, Math.floor((v.min - (v.max - v.min) * 0.1) * 10) / 10),
+        max: v => Math.min(1, Math.ceil((v.max + (v.max - v.min) * 0.1) * 10) / 10 || 1) }, extra);
+    }
 
     function renderSeries(data) {
       const pts = data.points || [];
@@ -397,14 +418,14 @@
       charts.chartOverview.setOption({
         tooltip: { valueFormatter: v => (v * 100).toFixed(1) + "%" },
         xAxis: { type: "category", data: x, boundaryGap: false },
-        yAxis: occAxis(),
+        yAxis: autoOccAxis(),
         series: [{ name: "占用率", type: "line", data: pts.map(p => p.occupancy), areaStyle: { color: "rgba(22,93,255,0.08)" } }],
       }, true);
       charts.chartSeries.setOption({
         legend: { data: ["占用率", "估算负荷（kW）"] },
         grid: { left: 48, right: 56, top: 40, bottom: 32 },
         xAxis: { type: "category", data: x, boundaryGap: false },
-        yAxis: [occAxis({ name: "占用率", nameTextStyle: { color: "#86909C" } }),
+        yAxis: [autoOccAxis({ name: "占用率", nameTextStyle: { color: "#86909C" } }),
                 { type: "value", name: "kW", nameTextStyle: { color: "#86909C" }, splitLine: { show: false } }],
         series: [
           { name: "占用率", type: "line", data: pts.map(p => p.occupancy) },
@@ -482,12 +503,70 @@
         const note = String(r.note || "").replace(/missing_rate\s*>\s*0?\.30/i, "缺失率 > 30%").replace(/[A-Za-z_]{4,}/g, "").trim() || m.note;
         return `<tr><td>${m.name}</td><td class="num">${fmt(r)}${m.unit === "%" ? "%" : " " + m.unit}</td><td>${note}</td><td>${judge}</td></tr>`;
       }).join("");
-      // 站点级明细：若接口将来返回 stations 字段则直接展示，否则显示空状态
-      const st = rows.stations || [];
-      $("stationBody").innerHTML = st.length ? st.map(s => `<tr><td>${s.station_id}</td><td>${s.taz_id || "-"}</td>
-        <td>${s.stuck ? '<span class="tag danger">数据卡死</span>' : '<span class="tag warning">高缺失</span>'}</td><td class="num">${((s.missing_rate || 0) * 100).toFixed(1)}%</td></tr>`).join("")
-        : `<tr><td colspan="4" class="empty">站点级质检明细暂未接入，可在「运维工单」查看已生成工单的站点</td></tr>`;
     }
+
+    /* ---------- 站点质检明细（/api/stations） ---------- */
+    const SUGGEST_CN = { repair: "维修", inspect: "巡检", none: "无需" };
+    const ST_TAG = { stuck: "danger", high_missing: "warning", normal: "success" };
+    const stQ = { status: "", taz_id: "", sort: "avg_occupancy", order: "desc", page: 1, page_size: 10 };
+    let stCounts = null;
+    const dash = "—";
+    const fmtPct = v => v == null ? dash : (v * 100).toFixed(1) + "%";
+    function stationRow(r, full) {
+      const tag = `<span class="tag ${ST_TAG[r.status] || "gray"}">${r.status_label || "未知"}</span>`;
+      const sug = r.ticket_suggest && r.ticket_suggest !== "none" ? `<span class="tag gray">${SUGGEST_CN[r.ticket_suggest] || "其他"}</span>` : `<span class="readonly-note">${dash}</span>`;
+      if (!full) return `<tr><td>站点 ${r.station_id}</td><td>${r.taz_id ?? dash}</td><td>${tag}</td><td class="num">${fmtPct(r.missing_rate)}</td><td class="num">${r.gap_days_max ?? dash}</td><td>${sug}</td></tr>`;
+      const occ = r.avg_occupancy == null ? dash : `<span class="bar-cell">${fmtPct(r.avg_occupancy)}<i><b style="width:${Math.round(r.avg_occupancy * 100)}%"></b></i></span>`;
+      return `<tr><td style="white-space:nowrap">站点 ${r.station_id}</td><td>${r.taz_id ?? dash}</td><td class="num">${r.total_piles ?? dash}</td><td class="num">${occ}</td>
+        <td class="num">${r.occupancy_rank ?? dash}</td><td class="num">${r.total_volume_kwh == null ? dash : (+r.total_volume_kwh).toLocaleString("zh-CN", { maximumFractionDigits: 1 })}</td>
+        <td class="num">${fmtPct(r.missing_rate)}</td><td class="num">${r.gap_days_max ?? dash}</td><td>${tag}</td><td>${sug}</td></tr>`;
+    }
+    function stationEmpty(msg) {
+      $("stationBody").innerHTML = `<tr><td colspan="10" class="empty">${msg}</td></tr>`;
+      $("stationPager").innerHTML = ""; $("stationExtra").textContent = "";
+    }
+    async function loadStationCounts() {
+      try {
+        const all = await apiGet(`/api/stations?page_size=100`);
+        const items = all.items || [];
+        stCounts = { "": all.total, stuck: 0, high_missing: 0, normal: 0 };
+        items.forEach(r => { if (r.status in stCounts) stCounts[r.status]++; });
+        const zones = [...new Set(items.map(r => r.taz_id).filter(z => z != null))].sort((a, b) => (+a) - (+b));
+        const zs = $("stationZone"), keep = zs.value;
+        zs.innerHTML = `<option value="">全部片区</option>` + zones.map(z => `<option value="${z}">片区 ${z}</option>`).join("");
+        zs.value = keep;
+        const flagged = items.filter(r => r.ticket_suggest && r.ticket_suggest !== "none")
+          .sort((a, b) => (a.status === "stuck" ? 0 : 1) - (b.status === "stuck" ? 0 : 1) || (b.missing_rate || 0) - (a.missing_rate || 0));
+        $("ovStationBody").innerHTML = flagged.length ? flagged.slice(0, 8).map(r => stationRow(r, false)).join("")
+          : `<tr><td colspan="6" class="empty">暂无待关注站点</td></tr>`;
+      } catch (e) {
+        stCounts = null;
+        $("ovStationBody").innerHTML = `<tr><td colspan="6" class="empty">站点明细暂不可用，可在「运维工单」查看已生成工单的站点</td></tr>`;
+      }
+      renderStationTabs();
+    }
+    function renderStationTabs() {
+      const tabs = [["", "全部"], ["stuck", "卡死"], ["high_missing", "高缺失"], ["normal", "正常"]];
+      $("stationTabs").innerHTML = tabs.map(([k, n]) => `<div data-k="${k}" class="${k === stQ.status ? "active" : ""}">${n}${stCounts ? `<em>${stCounts[k]}</em>` : ""}</div>`).join("");
+      $("stationTabs").querySelectorAll("div").forEach(d => d.onclick = () => { stQ.status = d.dataset.k; stQ.page = 1; renderStationTabs(); loadStations(); });
+    }
+    async function loadStations() {
+      document.querySelectorAll(".sort-ic").forEach(ic => { const on = ic.dataset.ic === stQ.sort; ic.className = "sort-ic" + (on ? " on" : ""); ic.textContent = on ? (stQ.order === "desc" ? "▼" : "▲") : "▼"; });
+      const qs = Object.entries(stQ).filter(([, v]) => v !== "").map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+      let d;
+      try { d = await apiGet(`/api/stations?${qs}`); }
+      catch (e) { return stationEmpty("站点级质检明细暂不可用，可在「运维工单」查看已生成工单的站点"); }
+      const items = d.items || [];
+      $("stationBody").innerHTML = items.length ? items.map(r => stationRow(r, true)).join("") : `<tr><td colspan="10" class="empty">当前筛选条件下没有站点</td></tr>`;
+      $("stationExtra").textContent = `共 ${d.total} 座`;
+      pager($("stationPager"), d.total, d.page || stQ.page, d.page_size || stQ.page_size, n => { stQ.page = n; loadStations(); });
+    }
+    document.querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
+      const k = th.dataset.sort;
+      if (stQ.sort === k) stQ.order = stQ.order === "desc" ? "asc" : "desc"; else { stQ.sort = k; stQ.order = "desc"; }
+      stQ.page = 1; loadStations();
+    });
+    $("stationZone").onchange = () => { stQ.taz_id = $("stationZone").value; stQ.page = 1; loadStations(); };
 
     /* ---------- 运维工单 ---------- */
     function renderTickets(list) {
@@ -550,6 +629,7 @@
       return (f ? `&from=${f}` : "") + (t ? `&to=${t}` : "");
     }
     let zoneCount = null;
+    const DEFAULT_ZONES = ["1106", "519", "1011"];
 
     async function loadAll() {
       const taz = $("zoneSelect").value;
@@ -581,6 +661,7 @@
       renderBaseline(baseline);
       renderTickets(tickets);
       window.__tickets = tickets;
+      loadStationCounts().then(loadStations);
     }
 
     async function loadZones() {
@@ -588,6 +669,8 @@
       let ids;
       try { ids = await apiGet(`/api/zones`); zoneCount = ids.length; } catch (e) { ids = ["demo_zone_1", "demo_zone_2"]; zoneCount = null; }
       sel.innerHTML = ids.map(z => `<option value="${z}">片区 ${String(z).replace(/^demo_zone_/, "样例 ")}</option>`).join("");
+      const def = DEFAULT_ZONES.find(z => ids.map(String).includes(z));   // 默认选波动明显的片区，避免平线
+      if (def) sel.value = def;
     }
 
     /* ---------- 路由 / 侧栏 ---------- */
@@ -642,7 +725,8 @@
     $("btnRefresh").onclick = loadAll;
     $("btnTopRefresh").onclick = loadAll;
     $("zoneSelect").onchange = loadAll;
-    $("btnReset").onclick = () => { $("dateFrom").value = "2022-09-01"; $("dateTo").value = "2022-09-07"; $("zoneSelect").selectedIndex = 0; loadAll(); };
+    $("btnReset").onclick = () => { $("dateFrom").value = "2022-09-01"; $("dateTo").value = "2022-09-07"; $("zoneSelect").selectedIndex = 0;
+      const def = DEFAULT_ZONES.find(z => [...$("zoneSelect").options].some(o => o.value === z)); if (def) $("zoneSelect").value = def; loadAll(); };
     window.addEventListener("resize", () => { autoFold(); resizeAll(); });
     autoFold(); route();
     loadZones().then(loadAll);
