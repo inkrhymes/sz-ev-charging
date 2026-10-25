@@ -77,3 +77,15 @@ rules:
 | run_day.py 演示 2 天（2022-09-01、09-02，25 站） | 每天 7 个任务全部成功，整条链路约 0.4 秒；每天 ods 7200 行、ads 552 行；warn：缺数比例约 20.5%（单日），缺数偏多 5 站，全天读数不变 4 站 |
 | 故意弄坏的分区（重复 50 行 + 20 个负数读数） | dq_ods 两条 block 规则失败，下游 5 个任务全部跳过 |
 | 全量单日分区质检（小紫的 2022-09-02，1682 站） | ods/dwd 各 484,416 行，两层质检合计约 1.6 秒，block 全过；warn：缺数偏多 179 站，全天读数不变 63 站 |
+| Airflow 2.9.3 单容器，触发 ds=2022-09-01（演示数据） | 7 个任务全部 success，从 ods_ingest 开始到 publish 结束约 7 秒 |
+| Airflow 中跑故意弄坏的 ds=2022-09-05（`airflow dags test`，坏数据放在临时目录） | dq_ods 为 failed，下游 5 个任务为 upstream_failed，阻断生效 |
+| Airflow 内存 | 启动时最高约 1.38G（上限 1.5G），空闲约 0.9G；演示完已 `down` 释放 |
+
+未通过的规则同时写入 `dq_alert`（DDL：`quality/sql/dq_alert.sql`，字段与告警页一致）。同一 ds / 层 / 规则只保留一条，重跑只刷新数值，不会把已处理的告警重新打开。
+
+## 7. 启停
+```bash
+docker compose -f orchestration/docker-compose.airflow.yml up -d     # 首次约 2 分钟（初始化 airflow 库）
+docker compose -f orchestration/docker-compose.airflow.yml down
+```
+本地 Web 界面：http://localhost:8080（admin / admin，仅本机演示用）。

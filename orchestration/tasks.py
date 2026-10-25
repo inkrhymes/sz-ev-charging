@@ -70,7 +70,8 @@ def _slice_demo(csv: Path, ds: str, ts_col: str = "ts") -> pd.DataFrame:
 def ods_ingest(ds: str) -> None:
     if _use_real("ods"):
         return _run([sys.executable, str(FULL_PIPELINE), "--start", ds, "--end", ds, "--layer", "ods"])
-    _write_part(_slice_demo(DEMO / "ods" / "ods_station_raw_5min.csv", ds), "ods", ds)
+    src = Path(os.getenv("DEMO_ODS_CSV", DEMO / "ods" / "ods_station_raw_5min.csv"))
+    _write_part(_slice_demo(src, ds), "ods", ds)
 
 
 def dwd_build(ds: str) -> None:
