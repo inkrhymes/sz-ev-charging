@@ -7,3 +7,4 @@ pyyaml>=6.0
 pyarrow>=14
 shapely>=2.0
 pyshp>=2.3
+fakeredis>=2.20

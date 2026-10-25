@@ -1185,6 +1185,109 @@ import ops as _ops  # noqa: E402
 _ops.register(app, lambda q, a=(): _sql(q, a), ok, err)  # lambda：测试可 monkeypatch app._sql
 
 
+
+# ---- 可选 Redis 读缓存：设置 REDIS_URL 才启用；没设或 Redis 挂了，行为与原来完全一样 ----
+# 只缓存 GET 的只读接口、只缓存 200 且没有退回文件的响应；key 含路径 + 排序后的查询参数 + 数据源模式。
+# 写操作（告警确认 / 工单）成功后清掉相关前缀。响应头 X-Cache: HIT / MISS。
+CACHE_TTL = {  # 秒；可用 CACHE_TTL_DEFAULT 整体覆盖历史类接口
+    "/api/realtime/zones": 5,
+    "/api/alerts": 10,
+    "/api/tickets": 10,
+}
+CACHE_HISTORY = {"/api/overview", "/api/zones", "/api/zone/series", "/api/quality", "/api/map/zones", "/api/map/hourly",
+                 "/api/site/suggest", "/api/forecast/metrics", "/api/baseline", "/api/data_range", "/api/stations"}
+CACHE_INVALIDATE = {"/api/alerts": ("/api/alerts", "/api/tickets", "/api/overview"), "/api/tickets": ("/api/tickets", "/api/alerts")}
+_redis_client = None
+_redis_down_until = 0.0
+
+
+def _cache_ttl(path: str) -> int | None:
+    if path in CACHE_TTL:
+        return CACHE_TTL[path]
+    if path in CACHE_HISTORY:
+        return int(os.getenv("CACHE_TTL_DEFAULT", "60"))
+    return None
+
+
+def _redis():
+    """REDIS_URL 未设返回 None；连接失败后 30 秒内不再尝试，避免每个请求都卡在超时上。"""
+    global _redis_client, _redis_down_until
+    url = os.getenv("REDIS_URL", "").strip()
+    if not url:
+        return None
+    import time as _t
+    if _t.time() < _redis_down_until:
+        return None
+    if _redis_client is None:
+        try:
+            import redis
+            _redis_client = redis.Redis.from_url(url, socket_timeout=0.2, socket_connect_timeout=0.2)
+        except Exception as e:  # 没装 redis 包等
+            app.logger.warning("Redis 缓存不可用：%s", e)
+            _redis_down_until = _t.time() + 30
+            return None
+    return _redis_client
+
+
+def _redis_failed(e):
+    global _redis_down_until
+    import time as _t
+    _redis_down_until = _t.time() + 30
+    app.logger.warning("Redis 出错，30 秒内不走缓存：%s", e)
+
+
+def _cache_key(path: str) -> str:
+    args = "&".join(f"{k}={v}" for k, vs in sorted(request.args.lists()) for v in vs)
+    return f"szev:{'mysql' if use_mysql() else 'file'}:{path}?{args}"
+
+
+@app.before_request
+def _cache_lookup():
+    if request.method != "GET" or _cache_ttl(request.path) is None:
+        return None
+    r = _redis()
+    if r is None:
+        return None
+    key = _cache_key(request.path)
+    g.cache_key = key
+    try:
+        hit = r.get(key)
+    except Exception as e:
+        _redis_failed(e)
+        g.cache_key = None
+        return None
+    if hit is None:
+        return None
+    g.cache_hit = True
+    resp = app.response_class(hit, status=200, mimetype="application/json")
+    resp.headers["X-Cache"] = "HIT"
+    return resp
+
+
+@app.after_request
+def _cache_store(resp):
+    key = getattr(g, "cache_key", None)
+    if key and not getattr(g, "cache_hit", False):
+        resp.headers["X-Cache"] = "MISS"
+        if resp.status_code == 200 and not getattr(g, "mysql_error", None) and resp.mimetype == "application/json":
+            try:
+                _redis().setex(key, _cache_ttl(request.path), resp.get_data())
+            except Exception as e:
+                _redis_failed(e)
+    elif request.method in ("POST", "PATCH", "PUT", "DELETE") and resp.status_code < 400:
+        base = "/" + "/".join(request.path.strip("/").split("/")[:2])
+        prefixes = CACHE_INVALIDATE.get(base)
+        r = _redis() if prefixes else None
+        if r is not None:
+            try:
+                for pre in prefixes:
+                    keys = list(r.scan_iter(match=f"szev:*:{pre}*", count=500))
+                    if keys:
+                        r.delete(*keys)
+            except Exception as e:
+                _redis_failed(e)
+    return resp
+
 # 必须放在文件末尾：python app.py 时 app.run() 会阻塞，写在它后面的路由（地图、告警）不会注册。
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
