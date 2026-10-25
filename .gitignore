@@ -17,3 +17,6 @@ mysql_data/
 docs/开题报告_用户附件.docx
 !data/demo/dwd/
 !data/demo/dwd/dwd_station_5min_clean.csv.gz
+!data/demo/ods/
+!data/demo/ods/ods_station_raw_5min.csv.gz
+!data/demo/ods/ods_station_info.csv.gz

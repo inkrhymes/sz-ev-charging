@@ -23,6 +23,9 @@ for f in sql/ods/*.sql sql/dwd/*.sql sql/ads/*.sql; do
 done
 
 echo "[3/5] 准备 demo CSV（缺失时由 ETL 重新生成）"
+for f in data/demo/ods/ods_station_raw_5min.csv data/demo/ods/ods_station_info.csv; do
+  if [ ! -f "$f" ] && [ -f "$f.gz" ]; then gunzip -kf "$f.gz"; fi
+done
 if [ ! -f data/demo/dwd/dwd_station_5min_clean.csv ] && [ -f data/demo/dwd/dwd_station_5min_clean.csv.gz ]; then
   gunzip -kf data/demo/dwd/dwd_station_5min_clean.csv.gz
 fi
