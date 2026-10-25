@@ -237,6 +237,10 @@
 
     <!-- 和上小时比 -->
     <section class="view" id="view-baseline">
+      <div class="card" style="display:flex;align-items:center;gap:12px;padding:10px 16px;margin-bottom:16px">
+        <button class="btn" id="btnFc" type="button">看预测对比</button>
+        <span class="readonly-note" id="fcHint">按上方日期看每小时和上一小时的差别</span>
+      </div>
       <div class="grid">
         <div class="card col-6 kpi"><div class="kpi-label">平均绝对误差 MAE<span class="tip" data-tip="实际值与参考值差多少，越小说明变化越平稳"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="kpi-val" id="maeVal">-</div><div class="kpi-foot" id="maeFoot"></div></div>
         <div class="card col-6 kpi"><div class="kpi-label">最大绝对误差</div><div class="kpi-val" id="maxErrVal">-</div><div class="kpi-foot" id="maxErrFoot"></div></div>
@@ -489,7 +493,9 @@
     }
 
     /* ---------- 和上小时比 ---------- */
-    function renderBaseline(data) {
+    function renderBaseline(data, isDefault) {
+      if (isDefault || !fcMode) { lastBaseline = data; if (data && data.forecast_window) fcWindow = data.forecast_window; }
+      $("fcHint").textContent = fcHintText(data);
       const pts = data.points || [];
       const x = pts.map(p => tsLabel(p.ts_hour));
       const fc = normForecast(data);
@@ -531,6 +537,32 @@
       const num = v => v == null || v === "" || isNaN(+v) ? null : +v;
       return { has, mae: num(m.mae_lgbm), maeLag: num(m.mae_lag1), rmse: num(m.rmse_lgbm), rmseLag: num(m.rmse_lag1), split: m.split_ts || (pts.find(p => p.y_hat_lgbm != null) || {}).ts_hour || null };
     }
+    // 「看预测对比」：按接口给的 forecast_window 单独取一段；再点一次回到原来的日期
+    let fcMode = false, fcWindow = null, lastBaseline = null;
+    const dayOf = v => String(v || "").slice(0, 10);
+    function fcHintText(d) {
+      const has = (d && d.points || []).some(p => p.y_hat_lgbm != null);
+      const w = d && d.forecast_window || fcWindow;
+      const wTxt = w ? `${dayOf(w.from)} 至 ${dayOf(w.to)}` : "";
+      if (fcMode) return has ? `正在看 ${wTxt} 的预测值和实际值` : "这段时间暂时没有预测结果，换个片区试试";
+      return has ? "当前日期里有预测值，图上一并画出" : w ? `当前日期还没有预测结果，预测只覆盖 ${wTxt}，点左边按钮查看` : "目前还没有预测结果";
+    }
+    async function loadForecastView() {
+      const taz = $("zoneSelect").value;
+      let d;
+      try {
+        if (!fcWindow) fcWindow = (lastBaseline || {}).forecast_window || ((await apiGet(`/api/baseline?taz_id=${encodeURIComponent(taz)}${rangeQs()}`)) || {}).forecast_window;
+        if (!fcWindow) { fcMode = false; $("btnFc").textContent = "看预测对比"; $("fcHint").textContent = "目前还没有预测结果"; return; }
+        d = await apiGet(`/api/baseline?taz_id=${encodeURIComponent(taz)}&from=${dayOf(fcWindow.from)}&to=${dayOf(fcWindow.to)}`);
+      } catch (e) { toast("预测数据暂时取不到"); return; }
+      renderBaseline(d);
+    }
+    $("btnFc").onclick = async () => {
+      fcMode = !fcMode;
+      $("btnFc").textContent = fcMode ? "回到所选日期" : "看预测对比";
+      $("btnFc").classList.toggle("primary", fcMode);
+      if (fcMode) await loadForecastView(); else if (lastBaseline) renderBaseline(lastBaseline, true);
+    };
     function renderForecastCards(fc) {
       $("fcCards").style.display = fc.has ? "" : "none";
       if (!fc.has) return;
@@ -671,12 +703,12 @@
           const res = await fetch(`${API_BASE}/api/tickets/${id}`, {
             method: "PATCH", headers: authHeaders(), body: JSON.stringify({ status: next }),
           });
-          const json = await res.json();
-          if (!json.ok) throw new Error(json.error);
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok || !json.ok) { toast(res.status === 401 || res.status === 403 ? "没有权限，请先用管理员登录" : (json.error || "保存失败")); return; }
           cur.status = next;
         } else { cur.status = next; }
       } catch (e) {
-        cur.status = next; // 离线时本地流转，保证演示可用
+        cur.status = next; // 接口连不上时本地流转，保证演示可用
       }
       renderTickets(list);
       toast(`工单 WO-${String(id).padStart(4, "0")} 已更新为「${STATUS[next][0]}」`);
@@ -851,7 +883,7 @@
       renderKpis(overview, zoneCount);
       renderSeries(series);
       renderQuality(quality);
-      renderBaseline(baseline);
+      if (fcMode) { lastBaseline = baseline; loadForecastView(); } else renderBaseline(baseline);
       renderTickets(tickets);
       window.__tickets = tickets;
       loadStationCounts().then(loadStations);
