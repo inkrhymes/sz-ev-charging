@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- 本机：嵌入式 Derby metastore（单进程）。生产可改为 MySQL metastore，见 docs/warehouse_design.md §7。
+     javax.jdo.option.ConnectionURL 会由 spark/jobs/common.py 按仓库根目录覆盖为绝对路径。 -->
+<configuration>
+  <property><name>javax.jdo.option.ConnectionURL</name><value>jdbc:derby:;databaseName=spark/_metastore/metastore_db;create=true</value></property>
+  <property><name>javax.jdo.option.ConnectionDriverName</name><value>org.apache.derby.jdbc.EmbeddedDriver</value></property>
+  <property><name>hive.metastore.schema.verification</name><value>false</value></property>
+  <property><name>datanucleus.schema.autoCreateAll</name><value>true</value></property>
+  <property><name>hive.exec.dynamic.partition</name><value>true</value></property>
+  <property><name>hive.exec.dynamic.partition.mode</name><value>nonstrict</value></property>
+</configuration>
+<!-- MySQL metastore 示例（生产）：
+  ConnectionURL      jdbc:mysql://mysql:3306/hive_metastore?createDatabaseIfNotExist=true
+  ConnectionDriverName com.mysql.cj.jdbc.Driver
+  ConnectionUserName / ConnectionPassword 走环境变量，不入库 -->

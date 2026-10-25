@@ -20,4 +20,12 @@ docs/开题报告_用户附件.docx
 !data/demo/ods/
 !data/demo/ods/ods_station_raw_5min.csv.gz
 !data/demo/ods/ods_station_info.csv.gz
+
+# spark 本地产物
 data/lake/
+data/warehouse/
+
+spark/_metastore/
+spark/_runs/
+derby.log
+spark-warehouse/
