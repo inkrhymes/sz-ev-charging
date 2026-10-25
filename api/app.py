@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__)
 
@@ -26,6 +26,19 @@ def _cors(resp):
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
     resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,OPTIONS"
     return resp
+
+
+def _in_range(ts: str) -> bool:
+    """按 ?from=YYYY-MM-DD&to=YYYY-MM-DD（含端点）过滤；未传则不过滤。"""
+    f, t = request.args.get("from"), request.args.get("to")
+    d = ts[:10]
+    return (not f or d >= f) and (not t or d <= t)
+
+
+@app.get("/")
+def dashboard():
+    """同源托管大屏 web/index.html，打开 http://localhost:5000 即可访问。"""
+    return send_from_directory(str(REPO / "web"), "index.html")
 
 
 @app.route("/api/<path:_any>", methods=["OPTIONS"])
@@ -171,7 +184,7 @@ def zone_series():
             taz_id = rows[0]["taz_id"] if rows else "1011"
         points = []
         for r in rows:
-            if r["taz_id"] != taz_id:
+            if r["taz_id"] != taz_id or not _in_range(r["ts_hour"]):
                 continue
             busy = float(r.get("busy_sum") or 0)
             piles = float(r.get("piles_sum") or 0) or 1
@@ -185,7 +198,7 @@ def zone_series():
                     "load_kw_est": round(occ * piles * 7.0, 2),
                 }
             )
-            if len(points) >= 168:
+            if len(points) >= 168 and not request.args.get("to"):
                 break
         return ok({"taz_id": taz_id, "points": points})
     taz_id = taz_id or "1011"
@@ -244,7 +257,9 @@ def baseline():
         rows = _zone_rows()
         if not taz_id:
             taz_id = rows[0]["taz_id"] if rows else "1011"
-        series = [r for r in rows if r["taz_id"] == taz_id][:48]
+        series = [r for r in rows if r["taz_id"] == taz_id and _in_range(r["ts_hour"])]
+        if not request.args.get("to"):
+            series = series[:48]
         points = []
         prev = None
         for r in series:
