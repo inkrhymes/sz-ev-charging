@@ -242,17 +242,20 @@ def test_realtime_page_fixture_and_refresh(browser):
 
 
 def test_lineage_page_fixture(browser):
-    """数据血缘：分层画图、点节点标亮上下游并出详情、搜索、出错和空数据提示。"""
+    """数据血缘：默认简要图用中文名、页面列；点节点标亮上下游并出中文详情；可切换全部细节；搜索、出错和空数据提示。"""
     import json
     from urllib.parse import urlparse, parse_qs
     pg, probs = open_page(browser)
     N = lambda i, k, l, lab: {"id": i, "kind": k, "layer": l, "name": lab, "label": lab}
-    nodes = [N("raw:a", "raw", "raw", "站点 CSV"), N("lake:ods/a", "lake", "ods", "ods/a"), N("hive:ods.a", "hive", "ods", "ods.a"),
-             N("mysql:t_a", "mysql", "ads", "t_a"), N("api:/api/a", "api", "api", "/api/a"), N("mysql:t_other", "mysql", "ads", "t_other")]
+    nodes = [N("raw:station_information", "raw", "raw", "UrbanEV 站点信息 CSV"), N("lake:ods/station_info", "lake", "ods", "ods/station_info"),
+             N("hive:ods.station_info", "hive", "ods", "ods.station_info"), N("mysql:ads_zone_occupancy_hour", "mysql", "ads", "ads_zone_occupancy_hour"),
+             N("api:/api/zones", "api", "api", "/api/zones"), N("mysql:no_map_table", "mysql", "ads", "no_map_table")]
     E = lambda s, t, sc, tasks, auto=True: {"source": s, "target": t, "kind": "write", "script": sc, "tasks": tasks, "auto": auto}
-    edges = [E("raw:a", "lake:ods/a", "etl/ingest.py", ["ods_ingest"]), E("lake:ods/a", "hive:ods.a", "etl/ingest.py", ["ods_ingest"]),
-             E("hive:ods.a", "mysql:t_a", "spark/jobs/pub.py", ["publish"], False), E("mysql:t_a", "api:/api/a", "GET /api/a", [])]
-    mode = {"v": "ok"}
+    edges = [E("raw:station_information", "lake:ods/station_info", "etl/full_pipeline.py", ["ods_ingest"]),
+             E("lake:ods/station_info", "hive:ods.station_info", "etl/full_pipeline.py", ["ods_ingest"]),
+             E("hive:ods.station_info", "mysql:ads_zone_occupancy_hour", "spark/jobs/ads_metrics.py", ["publish"], False),
+             E("mysql:ads_zone_occupancy_hour", "api:/api/zones", "GET /api/zones", [])]
+    mode = {"v": "ok"}; asked = []
     def handle(r):
         q = parse_qs(urlparse(r.request.url).query)
         if mode["v"] == "err":
@@ -260,7 +263,7 @@ def test_lineage_page_fixture(browser):
         if mode["v"] == "empty":
             d = {"nodes": [], "edges": []}
         elif q.get("node"):
-            assert q.get("direction") == ["both"]
+            asked.append((q["node"][0], q.get("direction")))
             d = {"nodes": nodes[:5], "edges": edges}
         else:
             d = {"nodes": nodes, "edges": edges}
@@ -268,20 +271,29 @@ def test_lineage_page_fixture(browser):
     pg.route("**/api/lineage*", handle)
     pg.goto(f"{UI_BASE}#/lineage"); pg.wait_for_timeout(1500)
     js = "echarts.getInstanceByDom(document.getElementById('chartLineage')).getOption()"
-    assert pg.evaluate(js + ".series[0].data.length") == 6
+    labels = dict(pg.evaluate(js + ".series[0].data.map(d => [d.id, d.label.formatter])"))
+    assert "api:/api/zones" not in labels  # 简要图不画接口
+    assert labels["mysql:ads_zone_occupancy_hour"] == "片区每小时占用率"
+    assert labels["page:zone"] == "片区分析"
+    assert labels["mysql:no_map_table"] == "no_map_table"  # 没有中文名就用原名
     heads = pg.evaluate(js + ".graphic[0].elements.map(e => e.style.text)")
-    assert heads == ["原始文件", "数据湖", "Hive 表", "消息流和文件", "业务库", "接口"]
+    assert heads == ["原始文件", "整理后的文件", "数据仓库", "实时消息", "业务库", "页面"]
     xs = dict(pg.evaluate(js + ".series[0].data.map(d => [d.id, d.x])"))
-    assert xs["raw:a"] < xs["lake:ods/a"] < xs["hive:ods.a"] < xs["mysql:t_a"] < xs["api:/api/a"]
-    pg.fill("#lnSearch", "t_a"); pg.press("#lnSearch", "Enter"); pg.wait_for_timeout(800)
+    assert xs["raw:station_information"] < xs["lake:ods/station_info"] < xs["hive:ods.station_info"] < xs["mysql:ads_zone_occupancy_hour"] < xs["page:zone"]
+    assert not re.search(r"[A-Za-z]", pg.inner_text("#view-lineage")), "默认不应看到英文"
+    pg.fill("#lnSearch", "片区每小时占用率"); pg.press("#lnSearch", "Enter"); pg.wait_for_timeout(800)
+    assert asked[-1] == ("mysql:ads_zone_occupancy_hour", ["both"])
+    assert pg.inner_text("#lnPanelTitle") == "片区每小时占用率"
     body = pg.inner_text("#lnPanelBody")
-    assert pg.inner_text("#lnPanelTitle") == "t_a"
-    assert "spark/jobs/pub.py" in body and "publish" in body and "手工补充" in body and "GET /api/a" in body
-    op = pg.evaluate(js + ".series[0].data.map(d => [d.id, d.itemStyle.opacity])")
-    assert dict(op)["mysql:t_other"] < 0.5 and dict(op)["raw:a"] == 1
-    assert "已标亮 5 个节点" in pg.inner_text("#lnExtra")
-    pg.click("#lnReset"); pg.wait_for_timeout(300)
-    assert not pg.is_visible("#lnPanel")
+    for t in ("类型", "业务库表", "原始名称", "ads_zone_occupancy_hour", "生成片区小时表", "spark/jobs/ads_metrics.py", "发布到业务库", "手工补充", "片区列表读取"):
+        assert t in body, t
+    op = dict(pg.evaluate(js + ".series[0].data.map(d => [d.id, d.itemStyle.opacity])"))
+    assert op["mysql:no_map_table"] < 0.5 and op["raw:station_information"] == 1 and op["page:zone"] == 1
+    pg.click("#lnToggle"); pg.wait_for_timeout(400)
+    labels = dict(pg.evaluate(js + ".series[0].data.map(d => [d.id, d.label.formatter])"))
+    assert labels["api:/api/zones"] == "片区列表接口" and "page:zone" in labels
+    assert pg.inner_text("#lnToggle") == "只看简要" and not pg.is_visible("#lnPanel")
+    pg.click("#lnToggle"); pg.wait_for_timeout(300)
     assert not probs["js"], probs["js"]
     assert not BANNED.findall(pg.evaluate("document.body.innerText"))
     for m, txt in (("err", "血缘数据暂时取不到"), ("empty", "还没有血缘数据")):

@@ -288,11 +288,11 @@
     </section>
     <section class="view" id="view-lineage">
       <div class="card filter">
-        <div class="f">找表<input id="lnSearch" list="lnList" placeholder="输入表名、目录或接口" style="width:260px" /><datalist id="lnList"></datalist></div>
-        <div class="ops"><button class="btn" id="lnReset">看全部</button><button class="btn primary" id="lnFind">定位</button></div>
+        <div class="f">找表<input id="lnSearch" list="lnList" placeholder="输入名称，如 片区每小时占用率" style="width:260px" /><datalist id="lnList"></datalist></div>
+        <div class="ops"><button class="btn" id="lnToggle">显示全部细节</button><button class="btn" id="lnReset">清除标亮</button><button class="btn primary" id="lnFind">定位</button></div>
       </div>
       <div class="grid">
-        <div class="card col-24"><div class="card-head"><div class="card-title">数据从哪来、被谁用<span class="tip" data-tip="从左到右是数据流动的方向。点一个节点，会把它的全部上游和下游标亮"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="lnExtra"></div></div>
+        <div class="card col-24"><div class="card-head"><div><div class="card-title">数据从哪来、被谁用</div><div style="color:#86909c;font-size:13px;margin-top:4px">原始文件先导入、清洗、汇总，再存进业务库，最后由各个页面读出来展示。从左往右就是数据流动的方向，点任意一项会标亮它的来源和去向。</div></div><div class="card-extra" id="lnExtra"></div></div>
           <div class="card-body"><div id="lnState" class="empty" style="display:none"></div><div id="chartLineage" style="height:640px"></div></div></div>
         <div class="card col-24" id="lnPanel" style="display:none"><div class="card-head"><div class="card-title" id="lnPanelTitle">节点详情</div></div>
           <div class="card-body" id="lnPanelBody"></div></div>
@@ -1317,13 +1317,64 @@
     let rtRows = [];
     function rtStart() { if (rtTimer) return; loadRealtime(); rtTimer = setInterval(() => { if (!document.hidden) loadRealtime(); }, RT_EVERY); }
     /* ---------- 数据血缘 ---------- */
-    const LN_COLS = [["raw", "原始文件"], ["lake", "数据湖"], ["hive", "Hive 表"], ["stream", "消息流和文件"], ["mysql", "业务库"], ["api", "接口"]];
-    const LN_COL_OF = { raw: 0, lake: 1, hive: 2, stream: 3, file: 3, mysql: 4, api: 5 };
-    const LN_KIND = { raw: "原始文件", lake: "数据湖目录", hive: "Hive 表", stream: "消息流", file: "文件", mysql: "业务库表", api: "接口" };
-    const LN_LAYER = { raw: "原始数据", ods: "原始入库", dwd: "清洗后", ads: "汇总结果", dq: "数据检查", ops: "调度记录", rt: "实时", stream: "消息流", file: "文件", api: "接口" };
-    const LN_COLOR = ["#86909c", "#14c9c9", "#722ed1", "#ff7d00", "#165dff", "#00b42a"];
-    let lnAll = null, lnSel = null, lnHi = null, lnHiEdges = null;
-    const lnName = id => { const n = lnAll && lnAll.nodes.find(x => x.id === id); return n ? n.label : id; };
+    const LN_NAME = {
+      "raw:pile_information": "充电桩功率表", "raw:station_information": "站点信息表", "raw:taz_shapefile_poi": "片区边界和周边设施",
+      "raw:urbanev_station_raw": "站点充电原始记录", "raw:weather_csv": "气象站逐小时天气",
+      "stream:airflow_task_events": "调度任务开始结束", "stream:kafka_charge_5min": "实时充电消息", "file:lineage/lineage.json": "血缘记录文件",
+      "lake:ods/charge_5min": "充电记录", "lake:ods/pile_power": "充电桩功率", "lake:ods/poi": "周边设施", "lake:ods/station_info": "站点信息", "lake:ods/weather": "天气记录",
+      "lake:dwd/charge_5min_clean": "清洗后充电记录", "lake:dwd/quality_station": "站点数据质量", "lake:dwd/weather_hourly": "每小时天气",
+      "lake:dwd/zone_price_hour": "片区每小时电价", "lake:dwd/zone_weather_hour": "片区每小时天气",
+      "lake:ads/forecast_metric_daily": "每日预测误差", "lake:ads/forecast_zone_hour": "片区每小时预测", "lake:ads/zone_condition_effect": "天气电价影响",
+      "lake:ads/zone_daily": "片区每日汇总", "lake:ads/zone_function_label": "片区功能分类", "lake:ads/zone_hour": "片区每小时汇总", "lake:ads/zone_site_suggest": "选址补桩建议",
+      "hive:ods.charge_5min": "充电记录", "hive:ods.station_info": "站点信息", "hive:dwd.ext_charge_5min_clean": "清洗后充电记录",
+      "hive:dwd.quality_station_day": "站点每日数据质量", "hive:dwd.station_5min_clean": "站点清洗记录", "hive:dwd.zone_hour": "片区每小时明细",
+      "hive:ads.baseline_naive": "和上小时对比", "hive:ads.city_overview": "全市总览", "hive:ads.quality_summary": "数据质量汇总",
+      "hive:ads.station_busy_day": "站点每日忙闲", "hive:ads.zone_daily": "片区每日汇总", "hive:ads.zone_occupancy_hour": "片区每小时占用率",
+      "mysql:ads_baseline_naive": "和上小时对比", "mysql:ads_city_overview": "全市总览", "mysql:ads_forecast_metric_daily": "每日预测误差",
+      "mysql:ads_forecast_zone_hour": "片区每小时预测", "mysql:ads_quality_summary": "数据质量汇总", "mysql:ads_ticket": "运维工单",
+      "mysql:ads_zone_daily": "片区每日汇总", "mysql:ads_zone_occupancy_hour": "片区每小时占用率", "mysql:ads_zone_site_suggest": "选址补桩建议",
+      "mysql:dim_station": "站点名录", "mysql:dq_alert": "异常告警", "mysql:dq_run_log": "数据检查记录", "mysql:ops_task_run": "调度运行记录", "mysql:rt_zone_occupancy": "片区实时占用",
+      "api:/api/alerts": "告警列表接口", "api:/api/alerts/<int:alert_id>": "告警处理接口", "api:/api/baseline": "上小时对比接口", "api:/api/data_range": "数据时间范围接口",
+      "api:/api/forecast/metrics": "预测误差接口", "api:/api/lineage": "数据血缘接口", "api:/api/map/hourly": "地图逐小时接口", "api:/api/map/zones": "地图片区接口",
+      "api:/api/ops/health_metrics": "运行健康接口", "api:/api/ops/runs": "运行记录接口", "api:/api/ops/runs/<ds>": "单日运行接口", "api:/api/overview": "总览接口",
+      "api:/api/quality": "数据质量接口", "api:/api/realtime/zones": "实时占用接口", "api:/api/runs": "调度运行接口", "api:/api/runs/<ds>": "单日调度接口",
+      "api:/api/site/suggest": "选址建议接口", "api:/api/tickets": "工单列表接口", "api:/api/tickets/<int:ticket_id>": "工单处理接口",
+      "api:/api/zone/series": "片区趋势接口", "api:/api/zones": "片区列表接口"
+    };
+    const LN_PAGE_OF = { "/api/overview": "overview", "/api/data_range": "overview", "/api/zones": "zone", "/api/zone/series": "zone", "/api/baseline": "baseline",
+      "/api/forecast/metrics": "baseline", "/api/map/hourly": "map", "/api/map/zones": "map", "/api/site/suggest": "site", "/api/realtime/zones": "realtime",
+      "/api/quality": "quality", "/api/runs": "runs", "/api/runs/<ds>": "runs", "/api/ops/runs": "runs", "/api/ops/runs/<ds>": "runs", "/api/ops/health_metrics": "runs",
+      "/api/lineage": "lineage", "/api/alerts": "alerts", "/api/alerts/<int:alert_id>": "alerts", "/api/tickets": "tickets", "/api/tickets/<int:ticket_id>": "tickets" };
+    const LN_SCRIPT = { "etl/full_pipeline.py": "整理原始数据", "etl/pile_power.py": "整理充电桩功率", "etl/weather_price.py": "整理天气和电价", "etl/zone_profile.py": "生成片区画像",
+      "forecast/daily.py": "每日预测", "forecast/evaluate.py": "评估预测误差", "orchestration/backfill_run_log.py": "补录运行记录", "orchestration/rebuild_dq_alerts.py": "重新生成告警",
+      "orchestration/run_log.py": "记录调度运行", "quality/engine.py": "数据检查", "spark/jobs/ads_build.py": "生成汇总表", "spark/jobs/ads_metrics.py": "生成片区小时表",
+      "spark/jobs/dwd_clean.py": "清洗充电记录", "spark/jobs/export_ads_parquet.py": "导出汇总结果", "stream/zone_occupancy_stream.py": "计算实时占用",
+      "PATCH /api/alerts/<int:alert_id>": "处理告警时写回", "PATCH /api/tickets/<int:ticket_id>": "处理工单时写回", "POST /api/tickets": "新建工单" };
+    const LN_TASK = { ads_build: "生成汇总", all_tasks: "全部任务", dq_ads: "检查汇总数据", dq_dwd: "检查清洗数据", dq_ods: "检查原始数据", dwd_build: "清洗数据",
+      forecast_daily: "每日预测", forecast_evaluate: "评估预测", manual: "手动运行", ods_ingest: "导入原始数据", publish: "发布到业务库", streaming: "实时计算" };
+    const LN_KIND = { raw: "原始文件", lake: "整理后的文件", hive: "数据仓库表", stream: "实时消息", file: "文件", mysql: "业务库表", api: "接口", page: "页面" };
+    const LN_LAYER = { raw: "原始数据", ods: "刚导入", dwd: "清洗后", ads: "汇总结果", dq: "数据检查", ops: "调度记录", rt: "实时", stream: "实时消息", file: "文件", api: "接口", page: "页面" };
+    const lnScript = s => { if (!s) return "—"; if (LN_SCRIPT[s]) return LN_SCRIPT[s]; const m = s.match(/^GET (\S+)/); return m && LN_NAME["api:" + m[1]] ? LN_NAME["api:" + m[1]].replace(/接口$/, "") + "读取" : s; };
+    let lnAll = null, lnSel = null, lnHi = null, lnFull = false;
+    const lnNode = id => lnView().nodes.find(x => x.id === id) || (lnAll && lnAll.nodes.find(x => x.id === id));
+    const lnName = id => id.startsWith("page:") ? ROUTES[id.slice(5)][1] : (LN_NAME[id] || ((lnAll && lnAll.nodes.find(x => x.id === id)) || {}).label || id);
+    const lnRaw = id => { const n = lnAll && lnAll.nodes.find(x => x.id === id); return n ? n.label : id; };
+    function lnView() {
+      const pages = [...new Set(Object.values(LN_PAGE_OF))].filter(p => ROUTES[p]).map(p => ({ id: "page:" + p, kind: "page", layer: "page", label: ROUTES[p][1] }));
+      const pageOf = id => { const p = id.startsWith("api:") && LN_PAGE_OF[id.slice(4)]; return p ? "page:" + p : null; };
+      const used = new Set(), pe = [], seen = new Set();
+      lnAll.edges.forEach(e => { const p = pageOf(e.target); if (p && !e.source.startsWith("api:") && !seen.has(e.source + p)) { seen.add(e.source + p); used.add(p); pe.push({ source: e.source, target: p, page: true }); } });
+      const usedPages = pages.filter(p => used.has(p.id));
+      if (lnFull) {
+        const ae = lnAll.nodes.filter(n => n.kind === "api" && pageOf(n.id)).map(n => ({ source: n.id, target: pageOf(n.id), page: true }));
+        ae.forEach(e => used.add(e.target));
+        return { nodes: lnAll.nodes.concat(pages.filter(p => used.has(p.id))), edges: lnAll.edges.concat(ae), cols: ["原始文件", "整理后的文件", "数据仓库", "实时消息", "业务库", "接口", "页面"] };
+      }
+      return { nodes: lnAll.nodes.filter(n => n.kind !== "api").concat(usedPages), edges: lnAll.edges.filter(e => !e.source.startsWith("api:") && !e.target.startsWith("api:")).concat(pe),
+        cols: ["原始文件", "整理后的文件", "数据仓库", "实时消息", "业务库", "页面"] };
+    }
+    const LN_COL_OF = { raw: 0, lake: 1, hive: 2, stream: 3, file: 3, mysql: 4, api: 5, page: 6 };
+    const LN_COLOR = ["#86909c", "#14c9c9", "#722ed1", "#ff7d00", "#165dff", "#00b42a", "#f53f3f"];
     function lnState(msg, retry) {
       const st = $("lnState");
       if (!msg) { st.style.display = "none"; $("chartLineage").style.visibility = ""; return; }
@@ -1338,74 +1389,89 @@
       try { d = await apiGet("/api/lineage"); } catch (e) { lnState("血缘数据暂时取不到，请稍后再试。", true); $("lnExtra").textContent = ""; return; }
       if (!d || !(d.nodes || []).length) { lnState("还没有血缘数据。"); $("lnExtra").textContent = ""; return; }
       lnAll = { nodes: d.nodes, edges: d.edges || [] };
-      $("lnList").innerHTML = lnAll.nodes.map(n => `<option value="${escHtml(n.label)}"></option>`).join("");
       lnState(""); lnDraw();
     }
     function lnDraw() {
-      const cols = LN_COLS.map(() => []);
-      lnAll.nodes.forEach(n => cols[LN_COL_OF[n.kind] ?? 3].push(n));
-      const order = ["raw", "ods", "dwd", "ads", "dq", "ops", "rt", "stream", "file", "api"];
-      cols.forEach(c => c.sort((a, b) => (order.indexOf(a.layer) - order.indexOf(b.layer)) || a.label.localeCompare(b.label)));
+      const v = lnView(), nc = v.cols.length;
+      const colOf = n => { let c = LN_COL_OF[n.kind] ?? 3; if (!lnFull && c === 6) c = 5; return c; };
+      $("lnList").innerHTML = v.nodes.map(n => `<option value="${escHtml(lnName(n.id))}"></option>`).join("");
+      const cols = v.cols.map(() => []);
+      v.nodes.forEach(n => cols[colOf(n)].push(n));
+      const order = ["raw", "ods", "dwd", "ads", "dq", "ops", "rt", "stream", "file", "api", "page"];
+      const pord = Object.keys(ROUTES);
+      cols.forEach(c => c.sort((a, b) => (order.indexOf(a.layer) - order.indexOf(b.layer)) || (pord.indexOf(a.id.slice(5)) - pord.indexOf(b.id.slice(5))) || lnName(a.id).localeCompare(lnName(b.id), "zh")));
       const rows = Math.max(...cols.map(c => c.length)), rowH = 26, top = 46;
       const h = top + rows * rowH + 20;
       $("chartLineage").style.height = h + "px"; charts.chartLineage.resize();
-      const W = $("chartLineage").clientWidth || 1000, colW = W / LN_COLS.length;
-      const maxW = colW - 30, cw = ch => /[\u2e80-\uffff]/.test(ch) ? 11.5 : 6.6;
-      const fit = t => { let w = 0, i = 0; for (; i < t.length; i++) { w += cw(t[i]); if (w > maxW) break; } if (i >= t.length) return t; let o = t.slice(0, i); while (o && [...o].reduce((a, c) => a + cw(c), 0) + 11 > maxW) o = o.slice(0, -1); return o + "…"; };
-      const pos = {};
+      const W = $("chartLineage").clientWidth || 1000, colW = W / nc;
+      const maxW = colW - 30, cw = ch => /[\u2e80-\uffff]/.test(ch) ? 12.5 : 7;
+      const fit = t => { let w = 0, i = 0; for (; i < t.length; i++) { w += cw(t[i]); if (w > maxW) break; } return i >= t.length ? t : t.slice(0, Math.max(1, i - 1)) + "…"; };
       const data = [];
       cols.forEach((c, ci) => c.forEach((n, ri) => {
         const y = top + (rows - c.length) * rowH / 2 + ri * rowH + rowH / 2;
-        pos[n.id] = [colW * ci + 10, y];
         const on = !lnHi || lnHi.has(n.id), me = n.id === lnSel;
-        const txt = fit(n.label);
         data.push({ id: n.id, name: n.id, x: colW * ci + 14, y, symbolSize: me ? 14 : 9,
-          itemStyle: { color: LN_COLOR[ci], opacity: on ? 1 : 0.15, borderColor: me ? "#1d2129" : "#fff", borderWidth: me ? 2 : 1 },
-          label: { show: true, position: "right", formatter: txt, fontSize: 11, color: on ? "#1d2129" : "#c9cdd4", fontWeight: me ? "bold" : "normal" }, _n: n });
+          itemStyle: { color: LN_COLOR[ci === nc - 1 ? 6 : ci], opacity: on ? 1 : 0.15, borderColor: me ? "#1d2129" : "#fff", borderWidth: me ? 2 : 1 },
+          label: { show: true, position: "right", formatter: fit(lnName(n.id)), fontSize: 12, color: on ? "#1d2129" : "#c9cdd4", fontWeight: me ? "bold" : "normal" }, _n: n });
       }));
-      const links = lnAll.edges.map(e => {
-        const on = !lnHiEdges || lnHiEdges.has(e.source + "|" + e.target);
+      let hiEdges = 0;
+      const links = v.edges.map(e => {
+        const on = !lnHi || (lnHi.has(e.source) && lnHi.has(e.target)); if (lnHi && on) hiEdges++;
         return { source: e.source, target: e.target, lineStyle: { color: on && lnHi ? "#165dff" : "#a9aeb8", opacity: on ? (lnHi ? 0.85 : 0.35) : 0.05, width: on && lnHi ? 1.6 : 1, curveness: 0.15 } };
       });
-      const graphic = LN_COLS.map(([, t], i) => ({ type: "text", left: colW * i + 10, top: 10, style: { text: t, fill: LN_COLOR[i], font: "bold 13px sans-serif" } }));
+      const graphic = v.cols.map((t, i) => ({ type: "text", left: colW * i + 10, top: 10, style: { text: t, fill: LN_COLOR[i === nc - 1 ? 6 : i], font: "bold 13px sans-serif" } }));
       charts.chartLineage.setOption({
-        tooltip: { formatter: p => p.dataType === "node" ? `${escHtml(p.data._n.label)}<br/>${LN_KIND[p.data._n.kind] || ""} · ${LN_LAYER[p.data._n.layer] || ""}` : `${escHtml(lnName(p.data.source))} → ${escHtml(lnName(p.data.target))}` },
+        tooltip: { formatter: p => { if (p.dataType !== "node") return `${escHtml(lnName(p.data.source))} → ${escHtml(lnName(p.data.target))}`; const n = p.data._n;
+          return `<b>${escHtml(lnName(n.id))}</b><br/>${LN_KIND[n.kind] || ""} · ${LN_LAYER[n.layer] || ""}` + (n.kind === "page" ? "" : `<br/><span style="color:#86909c">${escHtml(n.label)}</span>`); } },
         graphic,
         series: [{ type: "graph", layout: "none", data, links, edgeSymbol: ["none", "arrow"], edgeSymbolSize: 5, roam: false, animation: false,
-          emphasis: { disabled: true }, left: 14, right: W - (colW * (LN_COLS.length - 1) + 14), top: Math.min(...data.map(x => x.y)), bottom: h - Math.max(...data.map(x => x.y)) }]
+          emphasis: { disabled: true }, left: 14, right: W - (colW * (nc - 1) + 14), top: Math.min(...data.map(x => x.y)), bottom: h - Math.max(...data.map(x => x.y)) }]
       }, true);
-      $("lnExtra").textContent = lnHi ? `已标亮 ${lnHi.size} 个节点、${lnHiEdges.n} 条连线` : `共 ${lnAll.nodes.length} 个节点、${lnAll.edges.length} 条连线，点节点看上下游`;
+      $("lnExtra").textContent = lnHi ? `已标亮 ${lnHi.size} 项、${hiEdges} 条连线` : `共 ${v.nodes.length} 项，点任意一项看它的来源和去向`;
+      $("lnToggle").textContent = lnFull ? "只看简要" : "显示全部细节";
     }
     async function lnPick(id) {
       lnSel = id;
       let d;
-      try { d = await apiGet("/api/lineage?node=" + encodeURIComponent(id) + "&direction=both"); }
-      catch (e) { toast("这个节点的上下游取不到，请稍后再试"); return; }
-      lnHi = new Set((d.nodes || []).map(n => n.id)); lnHi.add(id);
-      lnHiEdges = new Set((d.edges || []).map(e => e.source + "|" + e.target));
-      lnHiEdges.n = (d.edges || []).length;
+      try {
+        if (id.startsWith("page:")) {
+          const apis = Object.keys(LN_PAGE_OF).filter(a => "page:" + LN_PAGE_OF[a] === id && lnAll.nodes.some(n => n.id === "api:" + a));
+          const rs = await Promise.all(apis.map(a => apiGet("/api/lineage?node=" + encodeURIComponent("api:" + a) + "&direction=both")));
+          d = { nodes: rs.flatMap(r => r.nodes || []), edges: rs.flatMap(r => r.edges || []) };
+        } else d = await apiGet("/api/lineage?node=" + encodeURIComponent(id) + "&direction=both");
+      } catch (e) { toast("这一项的来源和去向取不到，请稍后再试"); return; }
+      lnHi = new Set([id]);
+      (d.nodes || []).forEach(n => { lnHi.add(n.id); const p = n.id.startsWith("api:") && LN_PAGE_OF[n.id.slice(4)]; if (p) lnHi.add("page:" + p); });
       lnDraw(); lnPanel(id, d.edges || []);
     }
     function lnPanel(id, edges) {
-      const n = lnAll.nodes.find(x => x.id === id) || { label: id, kind: "", layer: "" };
-      const up = edges.filter(e => e.target === id), down = edges.filter(e => e.source === id);
-      const walk = (from, to) => { const seen = new Set([id]), q = [id]; while (q.length) { const c = q.shift(); edges.forEach(e => { if (e[from] === c && !seen.has(e[to])) { seen.add(e[to]); q.push(e[to]); } }); } return seen; };
+      const n = lnNode(id) || { id, label: id, kind: "", layer: "" };
+      const isPage = id.startsWith("page:");
+      const apiIds = isPage ? new Set(Object.keys(LN_PAGE_OF).filter(a => "page:" + LN_PAGE_OF[a] === id).map(a => "api:" + a)) : new Set([id]);
+      const walk = (from, to) => { const seen = new Set(apiIds), q = [...apiIds]; while (q.length) { const c = q.shift(); edges.forEach(e => { if (e[from] === c && !seen.has(e[to])) { seen.add(e[to]); q.push(e[to]); } }); } apiIds.forEach(x => seen.delete(x)); return seen; };
       const ups = walk("target", "source"), downs = walk("source", "target");
-      const row = e => `<tr><td>${escHtml(lnName(e.source))}</td><td>${escHtml(lnName(e.target))}</td><td><code>${escHtml(e.script || "—")}</code></td><td>${(e.tasks || []).length ? e.tasks.map(t => `<span class="tag blue">${escHtml(t === "manual" ? "手动" : t)}</span>`).join(" ") : '<span class="tag gray">无</span>'}</td><td>${e.auto ? '<span class="tag success">读代码识别</span>' : '<span class="tag warning">手工补充</span>'}</td></tr>`;
+      const up = edges.filter(e => apiIds.has(e.target)), down = isPage ? [] : edges.filter(e => e.source === id);
+      const nm = id => `${escHtml(lnName(id))}<div style="color:#86909c;font-size:12px">${escHtml(lnRaw(id))}</div>`;
+      const row = e => `<tr><td>${nm(e.source)}</td><td>${nm(e.target)}</td><td>${escHtml(lnScript(e.script))}<div style="color:#86909c;font-size:12px">${escHtml(e.script || "")}</div></td><td>${(e.tasks || []).length ? e.tasks.map(t => `<span class="tag blue">${escHtml(LN_TASK[t] || t)}</span><span style="color:#86909c;font-size:12px;margin:0 6px 0 2px">${escHtml(t)}</span>`).join("") : '<span class="tag gray">无</span>'}</td><td>${e.auto ? '<span class="tag success">读代码识别</span>' : '<span class="tag warning">手工补充</span>'}</td></tr>`;
       const tbl = (title, list) => `<div style="margin:12px 0 6px;font-weight:600">${title}（${list.length} 条）</div>` + (list.length
-        ? `<table><thead><tr><th>从</th><th>到</th><th>由哪个脚本产生</th><th>调度任务</th><th>来源</th></tr></thead><tbody>${list.map(row).join("")}</tbody></table>`
+        ? `<table><thead><tr><th>从</th><th>到</th><th>由哪一步产生</th><th>所属调度任务</th><th>怎么得到的</th></tr></thead><tbody>${list.map(row).join("")}</tbody></table>`
         : '<div class="empty">没有</div>');
-      $("lnPanelTitle").textContent = n.label;
-      $("lnPanelBody").innerHTML = `<div><span class="tag blue">${LN_KIND[n.kind] || n.kind}</span> <span class="tag gray">${LN_LAYER[n.layer] || n.layer}</span> <span style="color:#86909c;margin-left:8px">${escHtml(n.id)}</span></div>
-        <div style="margin-top:8px;color:#4e5969">整条链路上，上游 ${[...ups].filter(x => x !== id).length} 个，下游 ${[...downs].filter(x => x !== id).length} 个，相关连线 ${edges.length} 条。</div>`
-        + tbl("直接上游", up) + tbl("直接下游", down);
+      $("lnPanelTitle").textContent = lnName(id);
+      $("lnPanelBody").innerHTML = `<table><tbody>
+          <tr><td style="width:120px;color:#86909c">类型</td><td>${LN_KIND[n.kind] || "—"}</td></tr>
+          <tr><td style="color:#86909c">所在阶段</td><td>${LN_LAYER[n.layer] || "—"}</td></tr>
+          <tr><td style="color:#86909c">原始名称</td><td>${isPage ? "—" : escHtml(n.label)}</td></tr>
+          <tr><td style="color:#86909c">上下游</td><td>来源 ${ups.size} 项，去向 ${downs.size} 项</td></tr></tbody></table>`
+        + tbl(isPage ? "这个页面读的数据" : "直接来源", up) + (isPage ? "" : tbl("直接去向", down));
       $("lnPanel").style.display = "";
     }
     function lnFind() {
       const q = $("lnSearch").value.trim().toLowerCase();
       if (!q || !lnAll) return;
-      const n = lnAll.nodes.find(x => x.label.toLowerCase() === q) || lnAll.nodes.find(x => x.label.toLowerCase().includes(q) || x.id.toLowerCase().includes(q));
-      if (!n) { toast("没找到叫这个名字的表或接口"); return; }
+      const pri = ["mysql", "page", "api", "hive", "lake", "stream", "file", "raw"];
+      const ns = lnView().nodes.slice().sort((x, y) => pri.indexOf(x.kind) - pri.indexOf(y.kind)), f = n => [lnName(n.id), n.label, n.id].map(s => s.toLowerCase());
+      const n = ns.find(x => f(x).includes(q)) || ns.find(x => f(x).some(s => s.includes(q)));
+      if (!n) { toast("没找到这一项"); return; }
       lnPick(n.id);
     }
     charts.chartLineage.on("click", p => { if (p.dataType === "node") lnPick(p.data.id); });
@@ -1413,7 +1479,9 @@
     $("lnFind").onclick = lnFind;
     $("lnSearch").addEventListener("keydown", e => { if (e.key === "Enter") lnFind(); });
     $("lnSearch").addEventListener("change", lnFind);
-    $("lnReset").onclick = () => { lnSel = lnHi = lnHiEdges = null; $("lnSearch").value = ""; $("lnPanel").style.display = "none"; if (lnAll) lnDraw(); };
+    const lnClear = () => { lnSel = lnHi = null; $("lnSearch").value = ""; $("lnPanel").style.display = "none"; };
+    $("lnReset").onclick = () => { lnClear(); if (lnAll) lnDraw(); };
+    $("lnToggle").onclick = () => { lnFull = !lnFull; lnClear(); if (lnAll) lnDraw(); };
     function rtStop() { clearInterval(rtTimer); rtTimer = null; }
     function route() {
       let r = (location.hash.match(/^#\/(\w+)/) || [])[1];
