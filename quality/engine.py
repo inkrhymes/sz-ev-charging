@@ -332,7 +332,7 @@ def render_detail(rule, ds, actual, threshold):
     d = pd.Timestamp(ds)
     ctx = {"date": f"{d.month}月{d.day}日", "actual": _fmt_num(actual), "threshold": _fmt_num(threshold),
            "actual_pct": _fmt_pct(actual), "threshold_pct": _fmt_pct(threshold)}
-    tpl = (rule or {}).get("phrase") or "{date}有一项数据检查没通过（实测 {actual}，警戒线 {threshold}）"
+    tpl = (rule or {}).get("phrase") or "{date}有一项数据检查没通过（这次是 {actual}，超过 {threshold} 就提醒）"
     lvl = "需要处理，已暂停后续计算" if (rule or {}).get("severity") == "block" else "提醒"
     return f"{tpl.format(**ctx)}。【{lvl}】"[:500]
 

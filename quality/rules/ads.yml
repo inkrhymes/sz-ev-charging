@@ -1,6 +1,6 @@
 rules:
-  - {name: ads_row_count_min, type: row_count_min, min: 24, severity: block, phrase: "{date}片区汇总数据太少（只有 {actual} 行，至少要 {threshold} 行）"}
+  - {name: ads_row_count_min, type: row_count_min, min: 24, severity: block, phrase: "{date}片区汇总数据太少（只有 {actual} 行，少于 {threshold} 行就提醒）"}
   - {name: ads_pk_unique, type: duplicate_key, keys: [taz_id, ts_hour], severity: block, phrase: "{date}片区汇总里有 {actual} 条重复记录（同一片区同一小时出现多次）"}
   - {name: ads_occupancy_range, type: range, column: occupancy_avg, min: 0, max: 1, severity: block, phrase: "{date}片区汇总里有 {actual} 条使用率不在 0~100% 之间，数据有误"}
   - {name: ads_station_cnt_positive, type: range, column: station_cnt, min: 1, severity: block, phrase: "{date}片区汇总里有 {actual} 条记录站点数为 0，数据有误"}
-  - {name: ads_occupancy_not_null, type: not_null_rate, columns: [occupancy_avg], min: 0.5, severity: warn, phrase: "{date}片区汇总里有使用率的记录只占 {actual_pct}（要求至少 {threshold_pct}）"}
+  - {name: ads_occupancy_not_null, type: not_null_rate, columns: [occupancy_avg], min: 0.5, severity: warn, phrase: "{date}片区汇总里有使用率的记录只占 {actual_pct}（低于 {threshold_pct} 就提醒）"}

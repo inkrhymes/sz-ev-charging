@@ -848,7 +848,9 @@
       const parts = [];
       const t = alertText(a);
       if (t) parts.push(t);
-      if (a.metric_value != null) { const pc = a.threshold != null && +a.threshold > 0 && +a.threshold < 1; parts.push(`实际 ${fmtVal(a.metric_value, pc)}${a.threshold != null ? `，上限 ${fmtVal(a.threshold, pc)}` : ""}`); }
+      if (a.metric_value != null) { const pc = a.threshold != null && +a.threshold > 0 && +a.threshold < 1, v = fmtVal(a.metric_value, pc), th = a.threshold != null ? fmtVal(a.threshold, pc) : null;
+        if (a.rule_name === "dwd_stuck_cumulative_30d" && a.station_id) parts.push(`已经卡了 ${v} 天${th ? `，超过 ${th} 天就提醒` : ""}`);
+        else if (!t || t === ALERT_KIND[a.rule_name]) parts.push(`这次是 ${v}${th ? `，超过 ${th} 就提醒` : ""}`); }
       const where = [a.ds, LAYER_CN[a.layer] || a.layer].filter(Boolean).join(" · ");
       return `${parts.join("；") || "—"}${where ? `<div class="readonly-note">${where}</div>` : ""}`;
     }
