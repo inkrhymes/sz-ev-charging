@@ -209,6 +209,7 @@
 
     <!-- 运行总览 -->
     <section class="view" id="view-overview">
+      <div class="dq-note" id="ovDqNote" style="display:none;margin:0 0 12px;padding:8px 12px;border-radius:4px;background:#FFF7E8;color:#D25F00;font-size:13px"></div>
       <div class="grid kpis6" id="kpis"></div>
       <div class="grid">
         <div class="card col-16"><div class="card-head"><div class="card-title">片区占用率趋势<span class="tip" data-tip="这个片区里，每小时平均有多少桩在用"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="ovSeriesExtra"></div></div>
@@ -227,6 +228,7 @@
         <div class="f">日期<input type="date" id="dateFrom" value="2022-09-01" min="2022-09-01" max="2022-09-14" />至<input type="date" id="dateTo" value="2022-09-07" min="2022-09-01" max="2022-09-14" /></div>
         <div class="ops"><button class="btn" id="btnReset">重置</button><button class="btn primary" id="btnRefresh">查询</button></div>
       </div>
+      <div class="dq-note" id="zoneDqNote" style="display:none;margin:0 0 12px;padding:8px 12px;border-radius:4px;background:#FFF7E8;color:#D25F00;font-size:13px"></div>
       <div class="grid">
         <div class="card col-24"><div class="card-head"><div class="card-title">占用率与估算负荷<span class="tip" data-tip="按「占用率 × 片区里各站充电桩的额定功率之和」估算，只看趋势；有的站没有功率数据，就只按有数据的桩算"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="seriesExtra"></div></div>
           <div class="card-body"><div id="chartSeries" class="chart-main"></div></div></div>
@@ -612,7 +614,7 @@
         const m = METRIC[r.metric] || { name: "其他指标", unit: "", note: "" };
         // 库还没重算时 stuck_station_cnt 的说明是旧意思（全程不动），这时用本地说明，免得和标题对不上
         const stale = r.metric === "stuck_station_cnt" && /整个/.test(r.note || "");
-        const foot = (!stale && apiNote(r)) || m.note;
+        const foot = (METRIC[r.metric] && m.note) || (!stale && apiNote(r)) || "";  // 已知指标一律用本页的大白话说明
         return `<div class="card col-8 kpi"><div class="kpi-label" title="${m.name}">${m.name}${tip(m.tip || m.note)}</div>
           <div class="kpi-val ${level(r)}">${fmt(r)}<small>${m.unit}</small></div><div class="kpi-foot" title="${foot}">${foot}</div></div>`;
       }).join("");
@@ -620,7 +622,7 @@
         const m = METRIC[r.metric] || { name: "其他指标", unit: "", note: "" };
         const judge = /demo_station|^station_cnt/.test(r.metric) ? '<span class="tag gray">参考</span>'
           : (m.rate ? r.value > 0.2 : r.value > 0) ? '<span class="tag warning">需关注</span>' : '<span class="tag success">正常</span>';
-        const note = (r.metric === "stuck_station_cnt" && /整个/.test(r.note || "") ? "" : cleanNote(r.note)) || m.note;
+        const note = (METRIC[r.metric] && m.note) || cleanNote(r.note) || "";
         return `<tr><td>${m.name}</td><td class="num">${fmt(r)}${m.unit === "%" ? "%" : " " + m.unit}</td><td>${note}</td><td>${judge}</td></tr>`;
       }).join("");
     }
@@ -923,6 +925,21 @@
       const f = $("dateFrom").value, t = $("dateTo").value;
       return (f ? `&from=${f}` : "") + (t ? `&to=${t}` : "");
     }
+    // 质检没通过、后面的计算被暂停的日子（告警里级别为 high 的整体告警），页面上提醒一句
+    let blockedDays = new Set();
+    const mdText = d => `${+d.slice(5, 7)}月${+d.slice(8, 10)}日`;
+    function showDqNote(id, from, to) {
+      const days = [...blockedDays].filter(d => d >= from && d <= to).sort();
+      const el = $(id); if (!el) return;
+      if (!days.length) { el.style.display = "none"; return; }
+      const shown = days.slice(0, 5).map(mdText).join("、") + (days.length > 5 ? ` 等 ${days.length} 天` : "");
+      el.textContent = (days.length === 1 && from === to ? "这一天" : shown) + "的新数据没通过检查，显示的是上一次的数据";
+      el.style.display = "";
+    }
+    function renderDqNotes() {
+      showDqNote("zoneDqNote", $("dateFrom").value || "0000", $("dateTo").value || "9999");
+      showDqNote("ovDqNote", "2022-09-01", "2022-09-01");
+    }
     let zoneCount = null;
     const DEFAULT_ZONES = ["1106", "519", "1011"];
 
@@ -965,6 +982,10 @@
       window.__tickets = tickets;
       loadStationCounts().then(loadStations);
       loadMap(); loadAlerts();
+      if (!usingOffline) apiGet(`/api/alerts`).then(a => {
+        blockedDays = new Set((a || []).filter(x => x.level === "high" && !x.station_id && x.ds).map(x => String(x.ds).slice(0, 10)));
+        renderDqNotes();
+      }).catch(() => {}); else { blockedDays = new Set(); renderDqNotes(); }
     }
 
     async function loadZones() {
