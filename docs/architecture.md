@@ -70,7 +70,8 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 - 输出（hive 风格，`dt` 只在目录名里）：`data/lake/ods/charge_5min/dt=YYYY-MM-DD/part-0.parquet`、`data/lake/dwd/charge_5min_clean/dt=YYYY-MM-DD/part-0.parquet`，站点质检 `data/lake/dwd/quality_station/run=<start>_<end>/`。snappy 压缩，`ts` 为 timestamp[us]，Spark 可直接 `spark.read.parquet` 或建 Hive 外表 `PARTITIONED BY (dt string)`。
 - 幂等：每个分区先写 `.tmp_dt=…` 再整体替换，重跑同一天只覆盖该分区。
 - 清洗规则沿用演示子集（整行缺失 / 卡死站 / 站内 IQR 异常 / occupancy）；卡死和异常按本次运行窗口内每个站计算。
-- 单日实测：1682 站 × 288 = 484,416 行，约 14 s，ODS 1.7 MB、DWD 1.3 MB。全量数字见 `docs/full_load_metrics.md`，质检见 `docs/quality_report_full.md`。
+- 实测：单日 484,416 行约 14 s；全量 181 天 87,679,296 行，6 分 38 秒，ODS 82.3 MB、DWD 67.6 MB（源 CSV 5.09 GB）。数字见 `docs/full_load_metrics.md`，质检见 `docs/quality_report_full.md`。
+- 调度调用：`SZ_EV_LAKE=/workspace/sz-ev-charging/data/lake python etl/full_pipeline.py --start YYYY-MM-DD --end YYYY-MM-DD --layer ods|dwd|all`（单日可用 `--ds`）。站点维表：`data/lake/ods/station_info/part-0.parquet`。
 
 ### 8.2 Spark / Hive 离线数仓（小黑）
 > 【待小黑补充】ods/dwd/ads 的 Spark SQL 作业路径与参数（约定 `--ds`）、Metastore 配置、driver 内存、写回 MySQL 的表与索引、查询优化前后耗时。
