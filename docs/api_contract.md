@@ -25,3 +25,9 @@ Base：`http://localhost:5000`
 - MySQL 入库后可再加 `mode=mysql`（TODO）
 
 - `GET /api/zones`：返回片区 taz_id 列表（大屏下拉框使用）。
+
+## GET /api/stations — 站点明细（表格页）
+
+参数：`status`=stuck|high_missing|normal，`taz_id`，`sort`=avg_occupancy|missing_rate|total_volume_kwh|station_id（默认 avg_occupancy），`order`=asc|desc（默认 desc），`page`（默认 1），`page_size`（默认 10，最大 100）。
+
+返回：`{total, page, page_size, items[]}`，item 字段：`station_id, taz_id, total_piles, avg_occupancy, occupancy_rank, total_volume_kwh, missing_rate, gap_days_max, status, status_label, ticket_suggest`。全缺站的 `avg_occupancy`/`occupancy_rank` 为 null，排序时排在最后。

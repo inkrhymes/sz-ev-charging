@@ -332,5 +332,92 @@ def auth_login():
     return ok({"user": user, "role": role, "token": f"demo-{role}"})
 
 
+# ---- 站点明细（数据质量 / 运维工单表格页）----
+STATUS_LABEL = {"stuck": "疑似卡死", "high_missing": "高缺失", "normal": "正常"}
+
+
+@lru_cache(maxsize=1)
+def _station_detail_rows():
+    import gzip
+
+    q = {r["station_id"]: r for r in _quality_rows()}
+    demo_list = REPO / "data" / "demo" / "demo_station_list.csv"
+    piles = {}
+    if demo_list.is_file():
+        with demo_list.open(encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                piles[r["sid"]] = int(float(r.get("charge_count") or 0))
+    occ_sum, occ_n, vol = defaultdict(float), defaultdict(int), defaultdict(float)
+    clean = DWD / "dwd_station_5min_clean.csv"
+    opener = None
+    if clean.is_file():
+        opener = lambda: clean.open(encoding="utf-8")
+    elif clean.with_suffix(".csv.gz").is_file():
+        opener = lambda: gzip.open(clean.with_suffix(".csv.gz"), "rt", encoding="utf-8")
+    if opener:
+        with opener() as f:
+            for r in csv.DictReader(f):
+                sid = r["station_id"]
+                if r.get("occupancy"):
+                    occ_sum[sid] += float(r["occupancy"])
+                    occ_n[sid] += 1
+                if r.get("volume"):
+                    vol[sid] += float(r["volume"])
+    rows = []
+    for sid, r in q.items():
+        mr = float(r.get("missing_rate") or 0)
+        stuck = r.get("stuck_flag") in {"1", "1.0"}
+        status = "stuck" if stuck else ("high_missing" if mr > 0.30 else "normal")
+        avg = round(occ_sum[sid] / occ_n[sid], 4) if occ_n[sid] else None
+        rows.append({
+            "station_id": sid,
+            "taz_id": r.get("taz_id"),
+            "total_piles": piles.get(sid),
+            "avg_occupancy": avg,
+            "total_volume_kwh": round(vol[sid], 2) if sid in vol else None,
+            "missing_rate": round(mr, 4),
+            "gap_days_max": int(float(r.get("gap_days_max") or 0)),
+            "status": status,
+            "status_label": STATUS_LABEL[status],
+            "ticket_suggest": r.get("ticket_suggest") or "none",
+        })
+    ranked = sorted([x for x in rows if x["avg_occupancy"] is not None], key=lambda x: -x["avg_occupancy"])
+    for i, x in enumerate(ranked, 1):
+        x["occupancy_rank"] = i
+    for x in rows:
+        x.setdefault("occupancy_rank", None)
+    return rows
+
+
+@app.get("/api/stations")
+def stations():
+    """站点明细：?status=stuck|high_missing|normal &taz_id= &sort=avg_occupancy|missing_rate|station_id &order=asc|desc &page=1 &page_size=10"""
+    if not use_file():
+        return ok({"total": 0, "page": 1, "page_size": 10, "items": []})
+    rows = list(_station_detail_rows())
+    st = request.args.get("status")
+    if st:
+        rows = [r for r in rows if r["status"] == st]
+    taz = request.args.get("taz_id")
+    if taz:
+        rows = [r for r in rows if str(r["taz_id"]) == taz]
+    sort = request.args.get("sort", "avg_occupancy")
+    if sort not in {"avg_occupancy", "missing_rate", "station_id", "total_volume_kwh"}:
+        return err("bad sort")
+    desc = request.args.get("order", "desc") == "desc"
+    rows.sort(key=lambda r: (r[sort] is None, r[sort] if r[sort] is not None else 0), reverse=False)
+    if desc:
+        nn = [r for r in rows if r[sort] is not None][::-1]
+        rows = nn + [r for r in rows if r[sort] is None]
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        size = min(100, max(1, int(request.args.get("page_size", 10))))
+    except ValueError:
+        return err("bad page")
+    total = len(rows)
+    items = rows[(page - 1) * size: page * size]
+    return ok({"total": total, "page": page, "page_size": size, "items": items})
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
