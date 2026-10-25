@@ -41,6 +41,12 @@ DISTRICT_SEATS = {     # approx. anchor points (district seat + main subdistrict
     "大鹏新区": [(114.479, 22.588), (114.42, 22.63), (114.48, 22.54), (114.55, 22.53)]}
 EVENING_H = range(18, 23)  # 18:00-22:59
 NEAR_M = 2000
+BUSY_OCC = 0.8     # an hour counts as busy when occupancy >= 80%
+TARGET_OCC = 0.7   # suggest_add_piles brings evening P90 occupancy down to 70%
+ADD_GAP, ADD_P90, WATCH_GAP = 75, 0.6, 60
+OUT_COLS = ["run_dt", "taz_id", "center_lon", "center_lat", "station_cnt", "piles", "rated_kw", "avg_occupancy",
+            "peak_occupancy", "busy_hours_ratio", "demand_score", "supply_score", "gap_score", "suggest_add_piles",
+            "rank", "function_tag", "reason"]
 
 
 def to_3857(lon, lat):
@@ -117,10 +123,10 @@ def function_labels(supp: Path, lake: Path) -> pd.DataFrame:
     return z
 
 
-def site_suggest(raw: Path, lake: Path) -> pd.DataFrame:
+def site_suggest(raw: Path, lake: Path, run_dt: str | None = None) -> pd.DataFrame:
     zh = pd.read_parquet(lake / "dwd" / "zone_price_hour" / "part-0.parquet", columns=["taz_id", "ts", "occupancy", "hour"])
     ev = zh[zh.hour.isin(EVENING_H)]
-    occ = zh.groupby("taz_id").occupancy.agg(occ_avg="mean", occ_p90="quantile")
+    occ = zh.groupby("taz_id").occupancy.mean().rename("occ_avg").to_frame()
     occ["occ_p90"] = zh.groupby("taz_id").occupancy.quantile(.9)
     occ["occ_evening_p90"] = ev.groupby("taz_id").occupancy.quantile(.9)
     hp = zh.groupby(["taz_id", "hour"]).occupancy.mean().unstack()
@@ -140,39 +146,50 @@ def site_suggest(raw: Path, lake: Path) -> pd.DataFrame:
     z = occ.join(st, how="inner").reset_index().merge(
         fl[["taz_id", "district", "function_label", "poi_total", "poi_density_km2", "share_life", "share_biz_res", "share_food", "area_km2"]],
         on="taz_id", how="left")
-    z["piles_per_km2"] = (z.pile_cnt / z.area_km2.where(z.area_km2 > 0)).round(2)
-    z["rated_power_kw"] = z.rated_power_kw.where(z.rated_power_kw > 0)
-    # transparent score: average of three percentile ranks (0-1), higher = more need for piles
-    z["r_evening"] = z.occ_evening_p90.rank(pct=True)
-    z["r_avg"] = z.occ_avg.rank(pct=True)
-    z["r_supply"] = 1 - z.piles_within_2km.rank(pct=True)
-    z["score"] = (0.5 * z.r_evening + 0.3 * z.r_avg + 0.2 * z.r_supply).round(4)
-    z["score_formula"] = "0.5*晚高峰P90占用率排名 + 0.3*平均占用率排名 + 0.2*(1-周边2km桩数排名)"
-    sug, why = [], []
+    z = z.merge(fl[["taz_id", "center_lon", "center_lat"]], on="taz_id", how="left")
+    z["rated_power_kw"] = z.rated_power_kw.where(z.rated_power_kw > 0)  # 0 = power unknown
+    z["busy_hours_ratio"] = zh.assign(b=zh.occupancy >= BUSY_OCC).groupby("taz_id").b.mean().reindex(z.taz_id).to_numpy()
+    pct = lambda s: s.rank(pct=True) * 100
+    # transparent scores (0-100): demand high = busy, supply high = many piles nearby, gap = need
+    z["demand_score"] = (0.6 * pct(z.occ_evening_p90) + 0.4 * pct(z.occ_avg)).round(1)
+    z["supply_score"] = pct(z.piles_within_2km).round(1)
+    z["gap_score"] = (0.7 * z.demand_score + 0.3 * (100 - z.supply_score)).round(1)
+    # piles needed so evening P90 occupancy falls to TARGET_OCC (only when the gap is large)
+    need = np.ceil(z.pile_cnt * z.occ_evening_p90 / TARGET_OCC - z.pile_cnt).clip(lower=0)
+    add = (z.gap_score >= ADD_GAP) & (z.occ_evening_p90 >= ADD_P90)
+    z["suggest_add_piles"] = np.where(add, np.maximum(need, 1), 0).astype("int32")
+    why = []
     for r in z.itertuples():
-        base = (f"晚高峰（18–23 点）忙的时候占用率到 {r.occ_evening_p90:.0%}，平时平均 {r.occ_avg:.0%}；"
-                f"区内 {r.pile_cnt} 根桩，周边 2 公里平均 {r.piles_within_2km:.0f} 根")
-        if r.score >= 0.75 and r.occ_evening_p90 >= 0.6:
-            sug.append("add_piles"); why.append(base + "。晚上经常排满、周边桩也不多，建议加桩。")
-        elif r.score >= 0.6 or r.occ_evening_p90 >= 0.6:
-            sug.append("watch"); why.append(base + "。有时比较紧张，先观察，看后面几个月会不会更忙。")
+        base = (f"晚高峰（18–23 点）忙的时候占用率到 {r.occ_evening_p90:.0%}，全天平均 {r.occ_avg:.0%}，"
+                f"{r.busy_hours_ratio:.0%} 的小时占用率超过 {BUSY_OCC:.0%}；区内 {r.pile_cnt} 根桩，周边 2 公里平均 {r.piles_within_2km:.0f} 根")
+        if r.suggest_add_piles > 0:
+            why.append(base + f"。晚上经常排满、周边桩也不多，建议加 {r.suggest_add_piles} 根桩（加完后晚高峰占用率约降到 {TARGET_OCC:.0%}）。")
+        elif r.gap_score >= WATCH_GAP or r.occ_evening_p90 >= ADD_P90:
+            why.append(base + "。有时比较紧张，先观察，看后面几个月会不会更忙。")
         else:
-            sug.append("keep"); why.append(base + "。桩够用，维持现状。")
-    z["suggestion"] = sug; z["reason"] = why
-    z = z.sort_values("score", ascending=False).reset_index(drop=True); z.insert(1, "rank", np.arange(1, len(z) + 1, dtype="int32"))
-    z["taz_id"] = z.taz_id.astype("int32")
-    d = lake / "ads" / "zone_site_suggest"; d.mkdir(parents=True, exist_ok=True)
-    z.to_parquet(d / "part-0.parquet", index=False)
+            why.append(base + "。桩够用，维持现状。")
+    z["reason"] = why
+    z = z.sort_values(["gap_score", "demand_score"], ascending=False).reset_index(drop=True)
+    z["rank"] = np.arange(1, len(z) + 1, dtype="int32")
+    z = z.rename(columns={"pile_cnt": "piles", "rated_power_kw": "rated_kw", "occ_avg": "avg_occupancy",
+                          "peak_hour_occ": "peak_occupancy", "function_label": "function_tag"})
+    z["taz_id"] = z.taz_id.astype("int32"); z["station_cnt"] = z.station_cnt.astype("int32"); z["piles"] = z.piles.astype("int32")
+    for c in ("avg_occupancy", "peak_occupancy", "busy_hours_ratio"): z[c] = z[c].round(4)
+    z = z[OUT_COLS[1:]]
+    run_dt = run_dt or pd.Timestamp.now().strftime("%Y-%m-%d")
+    d = lake / "ads" / "zone_site_suggest" / f"run_dt={run_dt}"; d.mkdir(parents=True, exist_ok=True)
+    z.to_parquet(d / "part-0.parquet", index=False)   # run_dt comes from the partition dir
+    z.insert(0, "run_dt", run_dt)
     return z
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("step", choices=["function", "suggest"])
-    ap.add_argument("--supp", type=Path, default=SUPP); ap.add_argument("--raw", type=Path, default=RAW)
+    ap.add_argument("--supp", type=Path, default=SUPP); ap.add_argument("--raw", type=Path, default=RAW); ap.add_argument("--run-dt")
     a = ap.parse_args()
     if a.step == "function":
         z = function_labels(a.supp, LAKE)
         print(len(z), z.function_label.value_counts().to_dict(), z.district.value_counts().to_dict(), z.density_level.value_counts().to_dict())
     else:
-        z = site_suggest(a.raw, LAKE)
-        print(len(z), z.suggestion.value_counts().to_dict(), z.score.describe().round(3).to_dict())
+        z = site_suggest(a.raw, LAKE, a.run_dt)
+        print(len(z), (z.suggest_add_piles > 0).sum(), z.suggest_add_piles.sum(), z.gap_score.describe().round(1).to_dict())

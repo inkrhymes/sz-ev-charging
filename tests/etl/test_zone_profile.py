@@ -59,3 +59,49 @@ def test_function_labels(env):
 
 def test_few_poi_and_nearest_district():
     assert list(zp.nearest_district([113.93, 114.48], [22.53, 22.59])) == ["南山区", "大鹏新区"]
+
+
+def test_site_suggest(env, tmp_path):
+    supp, lake = env
+    zp.function_labels(supp, lake)
+    raw = tmp_path / "raw"; raw.mkdir()
+    ids = [11, 12, 21]
+    pd.DataFrame([[0, 150, 30000], [150, 0, 30000], [30000, 30000, 0]], index=pd.Index(ids, name="ID"),
+                 columns=ids).to_csv(raw / "station_distance.csv")
+    ts = pd.date_range("2022-09-01", periods=48, freq="h")
+    rows = []
+    for t, busy_eve, busy_day in ((1, 0.95, 0.5), (2, 0.1, 0.05)):
+        for x in ts:
+            rows.append((t, x, busy_eve if 18 <= x.hour <= 22 else busy_day, x.hour))
+    (lake / "dwd/zone_price_hour").mkdir(parents=True)
+    pd.DataFrame(rows, columns=["taz_id", "ts", "occupancy", "hour"]).to_parquet(lake / "dwd/zone_price_hour/part-0.parquet")
+    z = zp.site_suggest(raw, lake, "2026-10-25")
+    assert list(z.columns) == zp.OUT_COLS
+    assert (lake / "ads/zone_site_suggest/run_dt=2026-10-25/part-0.parquet").exists()
+    z = z.set_index("taz_id")
+    assert z.loc[1, "rank"] == 1 and z.loc[1, "piles"] == 16 and z.loc[2, "piles"] == 4
+    assert z.loc[1, "rated_kw"] == 542.0 and pd.isna(z.loc[2, "rated_kw"])
+    assert abs(z.loc[1, "avg_occupancy"] - (0.95 * 5 + 0.5 * 19) / 24) < 1e-4
+    assert z.loc[1, "peak_occupancy"] == 0.95 and z.loc[1, "busy_hours_ratio"] == round(5 / 24, 4)
+    # 2 zones: pct ranks are 100 / 50; zone1 more demand, more supply (16 vs 4 piles in 2 km)
+    assert z.loc[1, "demand_score"] == 100 and z.loc[1, "supply_score"] == 100
+    assert z.loc[1, "gap_score"] == 70.0 and z.loc[2, "gap_score"] == pytest.approx(0.7 * 50 + 0.3 * 50)
+    assert z.loc[1, "suggest_add_piles"] == 0  # gap 70 < 75 -> watch, not add
+    assert "观察" in z.loc[1, "reason"] and "维持现状" in z.loc[2, "reason"]
+    assert z.loc[1, "function_tag"] == "餐饮为主"
+
+
+def test_add_piles_count(env, tmp_path):
+    supp, lake = env
+    zp.function_labels(supp, lake)
+    raw = tmp_path / "raw"; raw.mkdir(); ids = [11, 12, 21]
+    pd.DataFrame(30000, index=pd.Index(ids, name="ID"), columns=ids).to_csv(raw / "station_distance.csv")
+    ts = pd.date_range("2022-09-01", periods=48, freq="h")
+    rows = [(t, x, (0.98 if t == 1 else 0.1), x.hour) for t in (1, 2) for x in ts]
+    (lake / "dwd/zone_price_hour").mkdir(parents=True)
+    pd.DataFrame(rows, columns=["taz_id", "ts", "occupancy", "hour"]).to_parquet(lake / "dwd/zone_price_hour/part-0.parquet")
+    z = zp.site_suggest(raw, lake, "x").set_index("taz_id")
+    # zone1 supply 0 within 2 km except itself: pile counts 10,6 / 4 -> supply ranks; gap high
+    assert z.loc[1, "gap_score"] >= 75
+    assert z.loc[1, "suggest_add_piles"] == int(np.ceil(16 * 0.98 / 0.7 - 16))  # 7
+    assert "建议加 7 根桩" in z.loc[1, "reason"]
