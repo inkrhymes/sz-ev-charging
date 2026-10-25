@@ -4,6 +4,7 @@
 Layout (hive-style, partition column `dt` NOT stored inside files):
   data/lake/ods/charge_5min/dt=YYYY-MM-DD/part-0.parquet
   data/lake/dwd/charge_5min_clean/dt=YYYY-MM-DD/part-0.parquet
+  data/lake/ods/station_info/part-0.parquet   (station_information.csv as Parquet)
   data/lake/dwd/quality_station/run=<start>_<end>/part-0.parquet
   data/lake/_staging/<start>_<end>_<pid>/<station>.parquet   (intermediate, per station)
 
@@ -32,7 +33,7 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = Path("/workspace/thesis_ev_data/gdrive/UrbanEV/UrbanEVDataset/20220901-20230228_station-raw")
-LAKE = ROOT / "data" / "lake"
+LAKE = Path(os.environ.get("SZ_EV_LAKE", ROOT / "data" / "lake"))  # override to share one lake across clones
 HIGH_MISSING_THR = 0.30
 RAW_COLS = ["busy", "idle", "s_price", "e_price", "fast_busy", "fast_idle",
             "slow_busy", "slow_idle", "duration", "volume"]
@@ -110,6 +111,8 @@ def main():
     info = pd.read_csv(SRC / "station_information.csv")
     piles = dict(zip(info.station_id.astype(int), info.charge_count.astype(int)))
     taz = dict(zip(info.station_id.astype(int), info.TAZID.astype(int)))
+    si = LAKE / "ods" / "station_info"; si.mkdir(parents=True, exist_ok=True)
+    info.rename(columns={"TAZID": "taz_id"}).astype({"station_id": "int32", "taz_id": "int32"}).to_parquet(si / "part-0.parquet", index=False)
     stg = LAKE / "_staging" / f"{tag}_{os.getpid()}"  # per-process: concurrent runs on the shared box must not clobber each other
     shutil.rmtree(stg, ignore_errors=True); stg.mkdir(parents=True)
     m = {}
