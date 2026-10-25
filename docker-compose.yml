@@ -1,0 +1,38 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: sz-ev-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sz_ev}
+      MYSQL_USER: ${MYSQL_USER:-ev}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-evpass}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: ./api
+    container_name: sz-ev-api
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-ev}:${MYSQL_PASSWORD:-evpass}@mysql:3306/${MYSQL_DATABASE:-sz_ev}
+      FLASK_ENV: development
+    ports:
+      - "${API_PORT:-5000}:5000"
+    volumes:
+      - ./api:/app
+      - ./web:/app/static_web:ro
+      - ./stubs:/app/stubs:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
