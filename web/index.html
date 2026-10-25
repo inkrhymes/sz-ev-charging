@@ -193,11 +193,13 @@
       <li data-route="overview"><svg class="ic"><use href="#i-dash"/></svg><span>运行总览</span></li>
       <li data-route="zone"><svg class="ic"><use href="#i-map"/></svg><span>片区分析</span></li>
       <li data-route="baseline"><svg class="ic"><use href="#i-trend"/></svg><span>和上小时比</span></li>
+      <li data-route="map"><svg class="ic"><use href="#i-map"/></svg><span>片区地图</span></li>
     </ul>
     <div class="group">数据治理</div>
     <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li></ul>
     <div class="group">运维管理</div>
-    <ul class="nav"><li data-route="tickets"><svg class="ic"><use href="#i-tool"/></svg><span>运维工单</span></li></ul>
+    <ul class="nav"><li data-route="alerts"><svg class="ic"><use href="#i-shield"/></svg><span>异常告警</span></li>
+      <li data-route="tickets"><svg class="ic"><use href="#i-tool"/></svg><span>运维工单</span></li></ul>
     <div class="collapse" id="btnFold"><svg class="ic"><use href="#i-fold"/></svg><span style="margin-left:8px">收起菜单</span></div>
   </aside>
 
@@ -252,9 +254,9 @@
     <!-- 数据质量 -->
     <section class="view" id="view-quality">
       <div class="grid" id="qualityKpis"></div>
-      <div class="card"><div class="card-head"><div class="card-title">数据检查结果<span class="tip" data-tip="窗口内全部样本站的检查结果"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
+      <div class="card"><div class="card-head"><div class="card-title">数据检查结果<span class="tip" data-tip="所选日期内全部样本站的检查结果"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
         <div class="card-body"><table><thead><tr><th>指标</th><th class="num">数值</th><th>说明</th><th>结论</th></tr></thead><tbody id="qualityBody"></tbody></table></div></div>
-      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">异常站列表<span class="tip" data-tip="窗口内每个站的占用、电量和缺数情况；占用排名从高到低"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="stationExtra"></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">异常站列表<span class="tip" data-tip="所选日期内每个站的占用、电量和缺数情况；占用排名从高到低"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="stationExtra"></div></div>
         <div class="sub-filter" style="margin-top:8px"><div class="tabs" id="stationTabs"></div>
           <div class="f" style="display:flex;align-items:center;gap:8px;color:var(--text-2)">片区<select id="stationZone" style="width:140px"><option value="">全部片区</option></select></div></div>
         <div class="card-body"><table><thead><tr><th>站</th><th>片区</th><th class="num">桩数</th>
@@ -262,6 +264,28 @@
           <th class="num sortable" data-sort="total_volume_kwh">累计电量（kWh）<span class="sort-ic" data-ic="total_volume_kwh"></span></th>
           <th class="num sortable" data-sort="missing_rate">缺数比例<span class="sort-ic" data-ic="missing_rate"></span></th><th class="num">最长断档（天）</th><th>状态</th><th>建议工单</th></tr></thead>
           <tbody id="stationBody"></tbody></table><div class="pager" id="stationPager"></div></div></div>
+    </section>
+
+    <!-- 片区地图 -->
+    <section class="view" id="view-map">
+      <div class="grid">
+        <div class="card col-16"><div class="card-head"><div class="card-title">深圳片区分布<span class="tip" data-tip="圆点位置是片区内各站的平均经纬度，颜色越深越忙，圆越大桩越多"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="mapExtra"></div></div>
+          <div class="card-body"><div id="chartMap" style="height:460px"></div></div></div>
+        <div class="card col-8"><div class="card-head"><div class="card-title">最忙的片区</div></div>
+          <div class="card-body"><table><thead><tr><th>片区</th><th class="num">站数</th><th class="num">平均占用率</th></tr></thead><tbody id="mapRank"></tbody></table></div></div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title" id="mapZoneTitle">片区里的站</div><div class="card-extra"><a id="mapZoneAll">看全部片区</a></div></div>
+        <div class="card-body"><table><thead><tr><th>站</th><th>片区</th><th class="num">桩数</th><th class="num">平均占用率</th><th class="num">缺数比例</th><th>状态</th></tr></thead><tbody id="mapStations"></tbody></table></div></div>
+    </section>
+
+    <!-- 异常告警 -->
+    <section class="view" id="view-alerts">
+      <div class="card">
+        <div class="tabs" id="alertTabs"></div>
+        <div class="card-body">
+          <table><thead><tr><th>编号</th><th>站</th><th>片区</th><th>问题</th><th>情况</th><th>紧急程度</th><th>发现时间</th><th>状态</th><th>操作</th></tr></thead><tbody id="alertBody"></tbody></table>
+        </div>
+      </div>
     </section>
 
     <!-- 运维工单 -->
@@ -339,6 +363,8 @@
       overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
       zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
       baseline: ["运行监控", "和上小时比", "实际占用和上一小时参考值差多少"],
+      map: ["运行监控", "片区地图", "在地图上看哪片最忙，点一下看片区里的站"],
+      alerts: ["运维管理", "异常告警", "数据检查发现的问题都列在这里，管理员可以跟进和关闭"],
       quality: ["数据治理", "数据质量", "采集数据有没有缺、有没有一直不动"],
       tickets: ["运维管理", "运维工单", "数据异常时自动开单；管理员可以改状态"],
     };
@@ -360,7 +386,7 @@
     });
     const $ = id => document.getElementById(id);
     const charts = {};
-    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
+    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
     const resizeAll = () => Object.values(charts).forEach(c => c.resize());
     const pct = v => (v * 100).toFixed(0) + "%";
     const tsLabel = ts => ts.slice(5, 16);   // MM-DD HH:mm
@@ -628,6 +654,88 @@
       toast(`工单 WO-${String(id).padStart(4, "0")} 已更新为「${STATUS[next][0]}」`);
     }
 
+    /* ---------- 片区地图 ---------- */
+    // 数据入口只有这一个函数：以后换成 MySQL ads 表或加预测字段，只改这里
+    async function fetchMapData() {
+      try { return { ...(await apiGet(`/api/map/zones`)), offline: false }; }
+      catch (e) {
+        const zones = [["1106",114.06,22.55,0.42,3],["519",113.93,22.53,0.31,2],["1011",114.12,22.60,0.18,2],["102",114.10,22.54,0.55,1],["595",113.79,22.72,null,1]]
+          .map(([taz_id, lon, lat, avg_occupancy, station_count]) => ({ taz_id, lon, lat, avg_occupancy, station_count, total_piles: station_count * 20 }));
+        return { zones, stations: [], offline: true };
+      }
+    }
+    let mapData = { zones: [], stations: [] }, mapZone = "";
+    const occColor = v => v == null ? "#C9CDD4" : v > 0.5 ? "#F53F3F" : v > 0.3 ? "#FF7D00" : v > 0.15 ? "#165DFF" : "#94BFFF";
+    async function loadMap() {
+      mapData = await fetchMapData();
+      const z = mapData.zones;
+      $("mapExtra").textContent = `${z.length} 个片区 · ${mapData.stations.length || "—"} 个站` + (mapData.offline ? " · 离线样例" : "");
+      charts.chartMap.setOption({
+        tooltip: { trigger: "item", formatter: p => { const d = p.data.raw; return `片区 ${d.taz_id}<br>站数 ${d.station_count}，桩数 ${d.total_piles}<br>平均占用率 ${d.avg_occupancy == null ? "暂无数据" : pct(d.avg_occupancy)}`; } },
+        grid: { left: 56, right: 24, top: 24, bottom: 40 },
+        xAxis: { type: "value", scale: true, name: "经度", nameLocation: "middle", nameGap: 26, axisLabel: { formatter: v => v.toFixed(2) } },
+        yAxis: { type: "value", scale: true, name: "纬度", axisLabel: { formatter: v => v.toFixed(2) } },
+        series: [{ type: "scatter", data: z.map(d => ({ value: [d.lon, d.lat], raw: d, itemStyle: { color: occColor(d.avg_occupancy), opacity: .85 } })),
+          symbolSize: (v, p) => 12 + Math.min(28, Math.sqrt(p.data.raw.total_piles || 1) * 2), label: { show: true, position: "top", formatter: p => p.data.raw.taz_id, color: "#4E5969", fontSize: 11 } }],
+      }, true);
+      const ranked = z.filter(d => d.avg_occupancy != null).sort((a, b) => b.avg_occupancy - a.avg_occupancy).slice(0, 8);
+      $("mapRank").innerHTML = ranked.map(d => `<tr><td><a data-z="${d.taz_id}">片区 ${d.taz_id}</a></td><td class="num">${d.station_count}</td><td class="num">${pct(d.avg_occupancy)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">暂无数据</td></tr>`;
+      $("mapRank").querySelectorAll("a[data-z]").forEach(a => a.onclick = () => pickZone(a.dataset.z));
+      pickZone(mapZone);
+    }
+    function pickZone(z) {
+      mapZone = z || "";
+      const list = mapData.stations.filter(s => !mapZone || String(s.taz_id) === mapZone);
+      $("mapZoneTitle").textContent = mapZone ? `片区 ${mapZone} 里的站` : "全部片区的站";
+      $("mapStations").innerHTML = list.map(s => `<tr><td>站点 ${s.station_id}</td><td>片区 ${s.taz_id}</td><td class="num">${s.total_piles ?? "—"}</td>
+        <td class="num">${s.avg_occupancy == null ? "—" : pct(s.avg_occupancy)}</td><td class="num">${pct(s.missing_rate)}</td>
+        <td><span class="tag ${s.status === "normal" ? "success" : s.status === "stuck" ? "danger" : "warning"}">${s.status_label}</span></td></tr>`).join("")
+        || `<tr><td colspan="6" class="empty">${mapData.offline ? "接口连不上，暂时看不到站点" : "这个片区没有站"}</td></tr>`;
+    }
+    charts.chartMap.on("click", p => p.data && pickZone(String(p.data.raw.taz_id)));
+    $("mapZoneAll").onclick = () => pickZone("");
+
+    /* ---------- 异常告警 ---------- */
+    const ALERT_KIND = { stuck: "读数不动", high_missing: "缺数偏多", long_gap: "长时间没数据" };
+    const ALERT_LEVEL = { high: ["紧急", "danger"], medium: ["一般", "warning"], low: ["提醒", "gray"] };
+    const ALERT_STATUS = { open: ["待处理", "danger"], processing: ["处理中", "blue"], closed: ["已关闭", "success"] };
+    let alertList = [], alertFilter = "all", alertsOffline = false;
+    // 数据入口：读、改都只走这两个函数
+    async function fetchAlerts() {
+      try { alertsOffline = false; return await apiGet(`/api/alerts`); }
+      catch (e) { alertsOffline = true; return [
+        { alert_id: 1, station_id: "1334", taz_id: "1068", kind: "stuck", level: "high", detail: "读数长时间不变", status: "open", created_at: "2022-09-14 23:55" },
+        { alert_id: 2, station_id: "1010", taz_id: "595", kind: "high_missing", level: "medium", detail: "缺数比例 100.0%", status: "processing", created_at: "2022-09-14 23:55" }]; }
+    }
+    async function saveAlert(id, status) {
+      if (alertsOffline) return; // TODO 离线样例只在页面里改，刷新后恢复
+      const res = await fetch(`${API_BASE}/api/alerts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, role: currentUser.role }) });
+      const json = await res.json(); if (!json.ok) throw new Error(json.error);
+    }
+    async function loadAlerts() { alertList = await fetchAlerts(); renderAlerts(); }
+    function renderAlerts() {
+      const cnt = s => alertList.filter(a => s === "all" || a.status === s).length;
+      $("alertTabs").innerHTML = [["all", "全部"], ["open", "待处理"], ["processing", "处理中"], ["closed", "已关闭"]]
+        .map(([k, n]) => `<div data-k="${k}" class="${k === alertFilter ? "active" : ""}">${n}<em>${cnt(k)}</em></div>`).join("");
+      $("alertTabs").querySelectorAll("div").forEach(d => d.onclick = () => { alertFilter = d.dataset.k; renderAlerts(); });
+      const isAdmin = currentUser.role === "admin";
+      const shown = alertList.filter(a => alertFilter === "all" || a.status === alertFilter);
+      $("alertBody").innerHTML = shown.map(a => {
+        const [sn, sc] = ALERT_STATUS[a.status] || ["未知", "gray"], [ln, lc] = ALERT_LEVEL[a.level] || ["提醒", "gray"];
+        const op = !isAdmin ? '<span class="readonly-note">登录管理员后可处理</span>'
+          : a.status === "open" ? `<a data-id="${a.alert_id}" data-to="processing">开始处理</a> <a data-id="${a.alert_id}" data-to="closed" style="margin-left:8px">直接关闭</a>`
+          : a.status === "processing" ? `<a data-id="${a.alert_id}" data-to="closed">处理完了</a>`
+          : `<a data-id="${a.alert_id}" data-to="open">重新打开</a>`;
+        return `<tr><td class="num" style="text-align:left">AL-${String(a.alert_id).padStart(4, "0")}</td><td>站点 ${a.station_id}</td><td>片区 ${a.taz_id}</td>
+          <td>${ALERT_KIND[a.kind] || "其他"}</td><td>${a.detail}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.created_at}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
+      }).join("") || `<tr><td colspan="9" class="empty">没有这类告警</td></tr>`;
+      $("alertBody").querySelectorAll("a[data-id]").forEach(el => el.onclick = async () => {
+        const a = alertList.find(x => x.alert_id === +el.dataset.id); const to = el.dataset.to;
+        try { await saveAlert(a.alert_id, to); a.status = to; renderAlerts(); toast(`告警 AL-${String(a.alert_id).padStart(4, "0")} 已改为「${ALERT_STATUS[to][0]}」`); }
+        catch (e) { toast(`没改成：${e.message === "no permission" ? "没有权限" : e.message}`); }
+      });
+    }
+
     /* ---------- 数据加载（实时接口失败时回落到离线样例） ---------- */
     function rangeQs() {
       const f = $("dateFrom").value, t = $("dateTo").value;
@@ -667,6 +775,7 @@
       renderTickets(tickets);
       window.__tickets = tickets;
       loadStationCounts().then(loadStations);
+      loadMap(); loadAlerts();
     }
 
     async function loadZones() {
@@ -702,6 +811,7 @@
       $("userName").textContent = d.user; $("popName").textContent = d.user; $("popRole").textContent = roleCn;
       $("avatar").textContent = String(d.user).slice(0, 1).toUpperCase();
       renderTickets(ticketList);
+      renderAlerts();
     }
     $("userBox").onclick = e => { if (e.target.closest(".menu-pop .info")) return; $("userPop").classList.toggle("open"); };
     document.addEventListener("click", e => { if (!e.target.closest("#userBox")) $("userPop").classList.remove("open"); });

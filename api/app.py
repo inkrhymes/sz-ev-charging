@@ -421,3 +421,79 @@ def stations():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
+
+# ---- 片区地图 / 告警（小黄，前端第 6、7 页）----
+@app.get("/api/map/zones")
+def map_zones():
+    """片区地图：每个片区的中心经纬度、站数、平均占用率，以及站点坐标。"""
+    if not use_file():
+        return ok({"zones": [], "stations": []})
+    demo_list = REPO / "data" / "demo" / "demo_station_list.csv"
+    coords = {}
+    if demo_list.is_file():
+        with demo_list.open(encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                coords[r["sid"]] = (float(r["longitude"]), float(r["latitude"]))
+    stations_out, agg = [], defaultdict(lambda: {"lon": 0.0, "lat": 0.0, "n": 0, "occ": [], "piles": 0})
+    for s in _station_detail_rows():
+        if s["station_id"] not in coords:
+            continue
+        lon, lat = coords[s["station_id"]]
+        stations_out.append({**s, "lon": lon, "lat": lat})
+        a = agg[str(s["taz_id"])]
+        a["lon"] += lon; a["lat"] += lat; a["n"] += 1; a["piles"] += s["total_piles"] or 0
+        if s["avg_occupancy"] is not None:
+            a["occ"].append(s["avg_occupancy"])
+    zones = [{
+        "taz_id": z, "lon": round(a["lon"] / a["n"], 6), "lat": round(a["lat"] / a["n"], 6),
+        "station_count": a["n"], "total_piles": a["piles"],
+        "avg_occupancy": round(sum(a["occ"]) / len(a["occ"]), 4) if a["occ"] else None,
+    } for z, a in agg.items()]
+    return ok({"zones": zones, "stations": stations_out})
+
+
+ALERT_LEVEL = {"stuck": "high", "high_missing": "medium", "long_gap": "low"}
+_ALERTS: list[dict] | None = None
+
+
+def alerts_store():
+    """由数据检查结果生成告警；状态保存在进程内存。TODO: MySQL 模式落表 ads_alert。"""
+    global _ALERTS
+    if _ALERTS is None:
+        _ALERTS = []
+        rows = _station_detail_rows() if use_file() else []
+        for s in rows:
+            kinds = []
+            if s["status"] == "stuck":
+                kinds.append(("stuck", "读数长时间不变"))
+            if s["missing_rate"] > 0.30:
+                kinds.append(("high_missing", f"缺数比例 {s['missing_rate']*100:.1f}%"))
+            if s["gap_days_max"] >= 2:
+                kinds.append(("long_gap", f"最长断档 {s['gap_days_max']} 天"))
+            for k, detail in kinds:
+                _ALERTS.append({"alert_id": len(_ALERTS) + 1, "station_id": s["station_id"], "taz_id": s["taz_id"],
+                                "kind": k, "level": ALERT_LEVEL[k], "detail": detail, "status": "open",
+                                "created_at": "2022-09-14 23:55", "note": ""})
+    return _ALERTS
+
+
+@app.get("/api/alerts")
+def alerts_list():
+    return ok(alerts_store())
+
+
+@app.patch("/api/alerts/<int:alert_id>")
+def alerts_patch(alert_id):
+    body = request.get_json(silent=True) or {}
+    status = body.get("status")
+    if status not in {"open", "processing", "closed"}:
+        return err("status must be open|processing|closed")
+    if (body.get("role") or "readonly") != "admin":
+        return err("no permission", 403)
+    for a in alerts_store():
+        if a["alert_id"] == alert_id:
+            a["status"] = status
+            a["note"] = str(body.get("note") or a["note"])[:200]
+            return ok(a)
+    return err("alert not found", 404)
