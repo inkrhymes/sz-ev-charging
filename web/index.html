@@ -46,8 +46,7 @@
     <div class="toolbar">
       <label class="meta">片区
         <select id="zoneSelect">
-          <option value="demo_zone_1">demo_zone_1</option>
-          <option value="demo_zone_2">demo_zone_2</option>
+          <option value="">加载中…</option>
         </select>
       </label>
       <button id="btnRefresh">刷新</button>
@@ -232,6 +231,7 @@
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error);
+          cur.status = next;
         } else {
           cur.status = next;
         }
@@ -273,6 +273,13 @@
       window.__tickets = tickets;
     }
 
+    async function loadZones() {
+      const sel = document.getElementById("zoneSelect");
+      let ids;
+      try { ids = await apiGet(`/api/zones`); } catch (e) { ids = ["demo_zone_1", "demo_zone_2"]; }
+      sel.innerHTML = ids.map(z => `<option value="${z}">片区 ${z}</option>`).join("");
+    }
+
     document.getElementById("btnRefresh").onclick = loadAll;
     document.getElementById("zoneSelect").onchange = loadAll;
     document.getElementById("btnLogin").onclick = async () => {
@@ -293,7 +300,7 @@
     window.addEventListener("resize", () => {
       chartSeries.resize(); chartQuality.resize(); chartBaseline.resize();
     });
-    loadAll();
+    loadZones().then(loadAll);
   </script>
 </body>
 </html>

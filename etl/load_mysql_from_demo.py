@@ -24,6 +24,9 @@ CFG = dict(
 )
 
 
+DEMO_LIST = Path(__file__).resolve().parent.parent / "data" / "demo" / "demo_station_list.csv"
+
+
 def conn():
     return pymysql.connect(**CFG)
 
@@ -71,10 +74,20 @@ def main():
     ]:
         cur.execute(f"TRUNCATE TABLE {t}")
 
+    info_path = ODS / "ods_station_info.csv"
+    if not info_path.exists():
+        # fresh clone: ods/ is gitignored; derive station info from the tracked demo list
+        src = DEMO_LIST
+        ODS.mkdir(parents=True, exist_ok=True)
+        with src.open(encoding="utf-8") as fi, info_path.open("w", encoding="utf-8", newline="") as fo:
+            w = csv.writer(fo)
+            w.writerow(["station_id", "taz_id", "lon_gcj", "lat_gcj", "lon_wgs", "lat_wgs", "total_piles", "rated_power_kw"])
+            for r in csv.DictReader(fi):
+                w.writerow([r["sid"], r["TAZID"], r["longitude"], r["latitude"], "", "", r.get("charge_count", ""), ""])
     load_csv(
         cur,
         "ods_station_info",
-        ODS / "ods_station_info.csv",
+        info_path,
         [
             "station_id",
             "taz_id",

@@ -23,3 +23,5 @@ Base：`http://localhost:5000`
 - 默认：读 `data/demo/dwd/*.csv`（小紫 ETL 实测），`/api/health` 里 `mode=file`
 - `MOCK=1`：强制假数据；假数据口径对齐质检报告（25/卡死4/高缺失6/缺失26.42%）
 - MySQL 入库后可再加 `mode=mysql`（TODO）
+
+- `GET /api/zones`：返回片区 taz_id 列表（大屏下拉框使用）。

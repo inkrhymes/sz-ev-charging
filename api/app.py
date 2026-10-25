@@ -175,6 +175,15 @@ def overview():
     )
 
 
+@app.get("/api/zones")
+def zones_list():
+    if use_file():
+        ids = sorted({r["taz_id"] for r in _zone_rows()}, key=lambda x: int(x) if str(x).isdigit() else 0)
+    else:
+        ids = ["1011", "1062", "335"]
+    return ok(ids)
+
+
 @app.get("/api/zone/series")
 def zone_series():
     taz_id = request.args.get("taz_id")
