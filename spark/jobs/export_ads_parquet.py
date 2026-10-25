@@ -12,6 +12,7 @@ load_kw_est / power_coverage 在这里用 pandas 按 ods/station_info 重算（�
   export_ads_parquet.py --start 2022-09-01 --end 2023-02-28 [--exclude 2022-09-02 ...] [--dry-run]
   export_ads_parquet.py --only quality_summary --only dim_station        # 只刷这两张小表
   export_ads_parquet.py --only load_kw --start ... --end ... --exclude 2022-09-02
+  export_ads_parquet.py --only site_suggest      # 小紫的 ads/zone_site_suggest Parquet → ads_zone_site_suggest（全量替换）
       # 只 UPDATE ads_zone_occupancy_hour 的 load_kw_est、power_coverage 两列，其他列/其他表不动
 幂等：每张分区表只 DELETE 本次要写的日期（被 --exclude 的日期原样保留），再批量 INSERT，单表一个事务。
 """
@@ -217,13 +218,89 @@ def update_load_kw(conn, dates: list[str], missing: dict) -> None:
           f"days={len(dates) - len(missing.get('ads_zone_occupancy_hour(load_kw)', []))} {time.time() - t0:.2f}s", flush=True)
 
 
+# ---- 选址/加桩建议：$SZ_EV_LAKE/ads/zone_site_suggest → ads_zone_site_suggest（全量替换）----
+SITE_COLS = ["run_dt", "taz_id", "center_lon", "center_lat", "station_cnt", "piles", "rated_kw", "avg_occupancy",
+             "peak_occupancy", "busy_hours_ratio", "demand_score", "supply_score", "gap_score", "suggest_add_piles",
+             "rank", "function_tag", "reason"]
+# Parquet 里可能的别名 → 表列（schema 未定，宽松映射）
+SITE_ALIAS = {"dt": "run_dt", "run_date": "run_dt", "ds": "run_dt", "lon": "center_lon", "lat": "center_lat",
+              "longitude": "center_lon", "latitude": "center_lat", "station_count": "station_cnt",
+              "pile_cnt": "piles", "total_piles": "piles", "piles_sum": "piles", "rated_kw_total": "rated_kw",
+              "rated_power_kw_total": "rated_kw", "occupancy_avg": "avg_occupancy", "occupancy_peak": "peak_occupancy",
+              "add_piles": "suggest_add_piles", "suggest_piles": "suggest_add_piles", "priority": "rank",
+              "zone_rank": "rank", "tag": "function_tag", "func_tag": "function_tag", "reason_text": "reason"}
+SITE_INT = {"station_cnt", "piles", "suggest_add_piles", "rank"}
+SITE_RND = {"center_lon": 6, "center_lat": 6, "rated_kw": 2, "avg_occupancy": 6, "peak_occupancy": 6,
+            "busy_hours_ratio": 6, "demand_score": 4, "supply_score": 4, "gap_score": 4}
+
+
+def site_suggest_frame(path=None):
+    """读 Parquet（目录或文件，支持 hive 分区如 run_dt=…），按 SITE_COLS 宽松映射。返回 (DataFrame, 缺失列, 多余列)。"""
+    import pandas as pd
+    path = Path(path or LAKE / "ads" / "zone_site_suggest")
+    if not path.exists():
+        raise SystemExit(f"找不到 {path}（小紫的 zone_site_suggest 还没生成？）")
+    raw = pd.read_parquet(path)
+    ren, extras = {}, []
+    for c in raw.columns:
+        k = str(c).strip().lower()
+        t = k if k in SITE_COLS else SITE_ALIAS.get(k)
+        if t and t not in ren.values():
+            ren[c] = t
+        else:
+            extras.append(str(c))
+    df = raw.rename(columns=ren)[list(ren.values())]
+    missing = [c for c in SITE_COLS if c not in df.columns]
+    for c in missing:
+        df[c] = None
+    df = df[SITE_COLS].copy()
+    if df["run_dt"].isna().all():
+        df["run_dt"] = dt.date.today()
+    df["run_dt"] = pd.to_datetime(df["run_dt"].astype(str)).dt.date
+    df["taz_id"] = df["taz_id"].astype(str)
+    if df["rank"].isna().all() and df["gap_score"].notna().any():   # 没给排名就按缺口分倒序排
+        df["rank"] = df.groupby("run_dt")["gap_score"].rank(ascending=False, method="first")
+    return df, missing, extras
+
+
+def site_suggest_rows(path=None) -> list[tuple]:
+    import pandas as pd
+    df, missing, extras = site_suggest_frame(path)
+    if missing:
+        print(f"[export_ads_parquet] site_suggest: Parquet 缺列 {missing}，写 NULL", flush=True)
+    if extras:
+        print(f"[export_ads_parquet] site_suggest: 未识别的列 {extras}，已忽略", flush=True)
+
+    def cell(c, v):
+        if v is None or (not isinstance(v, str) and pd.isna(v)):
+            return None
+        if c in SITE_INT:
+            return int(round(float(v)))
+        if c in SITE_RND:
+            return round(float(v), SITE_RND[c])
+        return v
+    return [tuple(cell(c, v) for c, v in zip(SITE_COLS, r)) for r in df.itertuples(index=False, name=None)]
+
+
+def load_site_suggest(conn, path=None) -> int:
+    rows = site_suggest_rows(path)
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM ads_zone_site_suggest")
+            cols = ",".join(f"`{c}`" for c in SITE_COLS)
+            cur.executemany(f"INSERT INTO ads_zone_site_suggest ({cols}) VALUES ({','.join(['%s'] * len(SITE_COLS))})", rows)
+        conn.commit()
+    return len(rows)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--ds", "--dt", dest="ds")
     p.add_argument("--start"); p.add_argument("--end")
     p.add_argument("--exclude", action="append", help="跳过的日期，可重复")
+    p.add_argument("--site-path", help="site_suggest 的 Parquet 路径（默认 $SZ_EV_LAKE/ads/zone_site_suggest）")
     p.add_argument("--dry-run", action="store_true", help="只读 Parquet 统计行数，不连 MySQL")
-    p.add_argument("--only", action="append", choices=["quality_summary", "dim_station", "load_kw"],
+    p.add_argument("--only", action="append", choices=["quality_summary", "dim_station", "load_kw", "site_suggest"],
                    help="只做这几项（可重复）；不给则全量导出")
     a = p.parse_args()
     only = set(a.only or [])
@@ -240,6 +317,10 @@ def main() -> None:
                                charset="utf8mb4", autocommit=False, init_command="SET time_zone='+08:00'")
         ensure_schema(conn)
     missing = {}
+    if "site_suggest" in only:
+        t0 = time.time()
+        n = load_site_suggest(conn, a.site_path)
+        print(f"[export_ads_parquet] ads_zone_site_suggest: rows={n} (全量替换) {time.time() - t0:.2f}s", flush=True)
     if "load_kw" in only:
         update_load_kw(conn, dates, missing)
     for mt, (ht, cols, dexpr, rnd) in (PART_TABLES.items() if not only else []):
