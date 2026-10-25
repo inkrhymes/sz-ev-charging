@@ -1,8 +1,8 @@
 # 验收清单（Acceptance Checklist）
 
-- 验收时间：2026-10-25 09:50（Asia/Shanghai），第二轮验收；第一轮为 09:30
+- 验收时间：2026-10-25 10:06（Asia/Shanghai），第三轮验收（UI 改版后）；第二轮 09:50，第一轮 09:30
 - 验收环境：Linux 箱，Docker 26.1.5，Docker Compose 2.26.1
-- 验收方式：全新克隆 `git clone https://github.com/inkrhymes/sz-ev-charging /tmp/fresh`（commit `9620485`），执行 `cp .env.example .env && bash scripts/start.sh`，模拟 workpc 首次部署，再逐项执行下列命令
+- 验收方式：仓库 `/workspace/sz-ev-charging`（commit `a104fa9`），`bash scripts/stop.sh --purge && bash scripts/start.sh` 后逐项执行；并核对新前端（侧栏/浅色/五页/默认片区 1106）
 - 结论：**34 项全部通过 ✅**，没有失败项。遗留问题见文末。
 
 约定：`B=http://localhost:5000`；MySQL 查询前缀记为 `Q="docker exec sz-ev-mysql mysql -uev -pevpass sz_ev -N -e"`。
@@ -66,7 +66,7 @@
 
 | 项目 | 验收方法 | 期望 | 实测结果 |
 |---|---|---|---|
-| 同源托管 | `curl -i $B/` | 200 text/html | ✅ 200，标题「深圳充电站运行管理可视化（演示）」 |
+| 同源托管 | `curl -i $B/` | 200 text/html | ✅ 200，标题「深圳市电动汽车充电站运行管理可视化系统」 |
 | 浏览器打开 | 浏览器访问 `http://localhost:5000` | KPI 显示 25/23/4/6 | ✅ 接口数据一致（大屏默认请求 `http://127.0.0.1:5000`） |
 | 全新克隆托管 | 在 /tmp/fresh 环境执行 `curl -s $B/ \| grep '<title>'` | 有标题 | ✅ 200 |
 
