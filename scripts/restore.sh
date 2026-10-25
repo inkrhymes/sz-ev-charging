@@ -27,10 +27,12 @@ echo "[restore] $DUMP -> 库 $TARGET"
 
 MYSQL=(docker exec -i "$CONTAINER" mysql -uroot -p"$ROOT_PW")
 "${MYSQL[@]}" -e "CREATE DATABASE IF NOT EXISTS \`$TARGET\` DEFAULT CHARACTER SET utf8mb4" 2>/dev/null
-# dump 带 CREATE DATABASE/USE 原库名；改写成目标库名
+# dump 带 CREATE DATABASE/USE 原库名；改写成目标库名。
+# 视图的 DEFINER（ev@%）去掉，由执行恢复的账号做定义者，否则 ev 对演练库无权限会导致建视图失败。
+# 导入错误不再吞掉，失败时脚本直接退出。
 gunzip -c "$DUMP" \
-  | sed -E "s/^(CREATE DATABASE[^\`]*\`)$DB(\`)/\1$TARGET\2/; s/^USE \`$DB\`;/USE \`$TARGET\`;/" \
-  | "${MYSQL[@]}" 2>/dev/null
+  | sed -E "s/^(CREATE DATABASE[^\`]*\`)$DB(\`)/\1$TARGET\2/; s/^USE \`$DB\`;/USE \`$TARGET\`;/; s#/\*!50013 DEFINER=[^*]*\*/##" \
+  | "${MYSQL[@]}" 2> >(grep -v 'Using a password' >&2)
 echo "[restore] 数据库已恢复到 $TARGET"
 
 if [ "$DO_LAKE" = 1 ]; then
