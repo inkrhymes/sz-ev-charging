@@ -1,9 +1,9 @@
 # 验收清单（Acceptance Checklist）
 
-- 验收时间：2026-10-25 09:30（Asia/Shanghai）
+- 验收时间：2026-10-25 09:50（Asia/Shanghai），第二轮验收；第一轮为 09:30
 - 验收环境：Linux 箱，Docker 26.1.5，Docker Compose 2.26.1
-- 验收方式：`bash scripts/stop.sh --purge` 清空后执行 `bash scripts/start.sh`，再逐项执行下列命令
-- 结论：**31 项全部通过 ✅**。另有 2 个未解决问题，见文末「遗留问题」。
+- 验收方式：全新克隆 `git clone https://github.com/inkrhymes/sz-ev-charging /tmp/fresh`（commit `9620485`），执行 `cp .env.example .env && bash scripts/start.sh`，模拟 workpc 首次部署，再逐项执行下列命令
+- 结论：**34 项全部通过 ✅**，没有失败项。遗留问题见文末。
 
 约定：`B=http://localhost:5000`；MySQL 查询前缀记为 `Q="docker exec sz-ev-mysql mysql -uev -pevpass sz_ev -N -e"`。
 
@@ -23,6 +23,7 @@
 | MySQL 健康 | `docker ps --filter name=sz-ev-mysql` | healthy | ✅ healthy |
 | API 容器 | `docker ps --filter name=sz-ev-api` | Up | ✅ Up |
 | 探活 | `curl $B/api/health` | `ok=true, mode=file` | ✅ `mode=file` |
+| 重复启动（幂等） | 不清卷，再次执行 `bash scripts/start.sh` | 退出码 0，无报错 | ✅ 退出码 0，无 1062 报错 |
 
 ## 三、数据分层（MySQL 行数）
 
@@ -58,6 +59,7 @@
 | 片区时序 | `curl "$B/api/zone/series?taz_id=1011&from=2022-09-01&to=2022-09-02"` | 48 个小时点 | ✅ 48（09-01 00:00～09-02 23:00） |
 | 片区时序（不传时间） | `curl "$B/api/zone/series?taz_id=1011"` | 默认 168 点 | ✅ 168 |
 | 质检汇总 | `curl $B/api/quality` | 4 项指标 | ✅ 4 项 |
+| 片区列表 | `curl $B/api/zones` | 返回有时序数据的 taz_id 列表 | ✅ 18 个（另见遗留问题 2） |
 | 跨域预检 | `curl -X OPTIONS $B/api/tickets -i` | 204/200 且带 CORS 头 | ✅ |
 
 ## 六、大屏
@@ -66,6 +68,7 @@
 |---|---|---|---|
 | 同源托管 | `curl -i $B/` | 200 text/html | ✅ 200，标题「深圳充电站运行管理可视化（演示）」 |
 | 浏览器打开 | 浏览器访问 `http://localhost:5000` | KPI 显示 25/23/4/6 | ✅ 接口数据一致（大屏默认请求 `http://127.0.0.1:5000`） |
+| 全新克隆托管 | 在 /tmp/fresh 环境执行 `curl -s $B/ \| grep '<title>'` | 有标题 | ✅ 200 |
 
 ## 七、扩展接口（工单 / 登录 / 基线）
 
@@ -87,9 +90,11 @@
 
 ## 遗留问题
 
-1. **`start.sh` 不支持重复执行**：数据卷保留时再次执行，`sql/ads/10_metrics_overview.sql` 会报 `ERROR 1062 Duplicate entry '2022-09-01' for key 'ads_city_overview.PRIMARY'`。目前的规避方法是先执行 `scripts/stop.sh --purge`。建议把回填 SQL 改为 `REPLACE INTO`，或者先 `TRUNCATE`（该文件归 @小黑 负责）。
-2. **API 仍为 file 模式**：MySQL 已装载，但接口读取的是 `data/demo/dwd/*.csv`，`mode=mysql` 尚未实现。两边数字一致。
-3. **工单状态只存在内存里**：PATCH 后的状态在 API 重启后会恢复成初始值，作为 stub 可以接受。
+1. ~~`start.sh` 不支持重复执行（1062 Duplicate entry）~~：**已解决**，第二轮不清卷再执行一次也通过了。
+2. 口径差异：`/api/overview` 的 `zone_cnt=23` 取质检与时序片区的并集，`/api/zones` 和 MySQL 中 `ads_city_overview.zone_cnt` 只统计有小时时序的片区，结果是 18；另外 5 个片区的站点全部缺失。对外统一说「覆盖 23 个片区，其中 18 个有有效时序」。
+3. API 仍为 file 模式，`mode=mysql` 尚未实现；两边数字一致。
+4. 工单状态只存在内存里，API 重启后会恢复成初始值（stub）。
+5. 已解决：全新克隆后 `ods_station_raw_5min` 能装满 100,800 行（`9620485` 随仓提供 gz 文件）。
 
 本次修复（只改了 `api/app.py`）：新增 `/` 路由，直接托管 `web/index.html`，此前返回 404；`zone/series` 和 `baseline` 在 file 模式下开始遵守 `from`/`to` 参数，此前会忽略这两个参数。
 
