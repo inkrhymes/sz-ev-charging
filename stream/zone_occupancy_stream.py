@@ -3,7 +3,7 @@
 输入（二选一）：
   --source kafka  topic charge_5min（6 分区，key=station_id），KAFKA_BOOTSTRAP 默认 localhost:9092
   --source file   --input DIR，目录里的 JSON lines（每行一条消息，测试/无 Kafka 时用）
-消息 value（JSON）：station_id, taz_id, ts(北京时间 'YYYY-MM-DD HH:MM:SS'), busy, idle, total_piles, occupancy, quality_flag
+消息 value（JSON）：station_id, taz_id, ts(北京时间，'YYYY-MM-DDTHH:MM:SS+08:00' 或 'YYYY-MM-DD HH:MM:SS')，缺失值为 JSON null, busy, idle, total_piles, occupancy, quality_flag
 窗口：按 taz_id，15 分钟滑动窗口、5 分钟步长，watermark 10 分钟。
 输出：foreachBatch 按 (taz_id, window_end) upsert 到 MySQL rt_zone_occupancy（--sink mysql），
       或写 CSV 到 --out 目录（--sink csv，测试用），或打印（--sink console）。
@@ -95,9 +95,18 @@ def read_messages(spark, source: str, input_dir: str | None = None, topic: str =
     return df.withColumn("ingest_ts", F.current_timestamp())
 
 
+def parse_event_ts(col):
+    """ts 兼容：'2022-09-01T00:00:00+08:00'（kafka_replay.py，带时区）、'2022-09-01T00:00:00'、
+    '2022-09-01 00:00:00'。带偏移的按偏移换算成绝对时刻；无偏移的按 session 时区（Asia/Shanghai）解释。"""
+    from pyspark.sql import functions as F
+    return F.coalesce(F.to_timestamp(col, "yyyy-MM-dd'T'HH:mm:ssXXX"),
+                      F.to_timestamp(col, "yyyy-MM-dd'T'HH:mm:ss"),
+                      F.to_timestamp(col, "yyyy-MM-dd HH:mm:ss"))
+
+
 def transform(df, watermark="10 minutes", window="15 minutes", slide="5 minutes"):
     from pyspark.sql import functions as F
-    df = df.withColumn("event_ts", F.to_timestamp("ts", "yyyy-MM-dd HH:mm:ss"))
+    df = df.withColumn("event_ts", parse_event_ts(F.col("ts")))
     cond = (F.col("event_ts").isNotNull() & F.col("taz_id").isNotNull() & F.col("busy").isNotNull()
             & (F.col("total_piles") > 0))
     flags = bad_flags()
