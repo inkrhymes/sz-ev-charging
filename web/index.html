@@ -206,7 +206,8 @@
       <li data-route="map"><svg class="ic"><use href="#i-map"/></svg><span>片区地图</span></li>
     </ul>
     <div class="group">数据治理</div>
-    <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li></ul>
+    <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li>
+      <li data-route="runs"><svg class="ic"><use href="#i-trend"/></svg><span>调度运行</span></li></ul>
     <div class="group">运维管理</div>
     <ul class="nav"><li data-route="alerts"><svg class="ic"><use href="#i-shield"/></svg><span>异常告警</span></li>
       <li data-route="tickets"><svg class="ic"><use href="#i-tool"/></svg><span>运维工单</span></li></ul>
@@ -274,6 +275,12 @@
     </section>
 
     <!-- 数据质量 -->
+    <section class="view" id="view-runs">
+      <div class="card"><div class="card-head"><div class="card-title">运行记录</div><span class="readonly-note" id="runsExtra"></span></div>
+        <div class="card-body">
+          <table><thead><tr><th>数据日期</th><th>开始时间</th><th>用时</th><th>结果</th><th>各步骤</th></tr></thead><tbody id="runsBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody></table>
+        </div></div>
+    </section>
     <section class="view" id="view-quality">
       <div class="grid" id="qualityKpis"></div>
       <div class="card"><div class="card-head"><div class="card-title">数据检查结果<span class="tip" data-tip="所选日期内全部样本站的检查结果"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
@@ -412,6 +419,7 @@
       map: ["运行监控", "片区地图", "在地图上看哪片最忙，点一下看片区里的站"],
       alerts: ["运维管理", "异常告警", "数据检查发现的问题都列在这里，管理员可以跟进和关闭"],
       quality: ["数据治理", "数据质量", "采集数据有没有缺、有没有一直不动"],
+      runs: ["数据治理", "调度运行", "每天的数据处理有没有按时跑完，哪一步出了问题"],
       tickets: ["运维管理", "运维工单", "数据异常时自动开单；管理员可以改状态"],
     };
 
@@ -1093,6 +1101,28 @@
     }
 
     /* ---------- 路由 / 侧栏 ---------- */
+    /* ---------- 调度运行（运行记录接口还在做，先按常见字段兼容展示；没有接口或没有记录时显示空状态） ---------- */
+    const RUNS_API = "/api/runs";
+    const RUN_ST = { success: ["成功", "success"], ok: ["成功", "success"], failed: ["失败", "danger"], fail: ["失败", "danger"], error: ["失败", "danger"],
+      running: ["运行中", "blue"], skipped: ["跳过", "gray"], queued: ["排队中", "gray"] };
+    const runTag = s => { const [cn, c] = RUN_ST[String(s || "").toLowerCase()] || [s || "未知", "gray"]; return `<span class="tag ${c}">${escHtml(cn)}</span>`; };
+    let runsLoaded = false;
+    async function loadRuns() {
+      runsLoaded = true;
+      const empty = msg => { $("runsBody").innerHTML = `<tr><td colspan="5" class="empty">${msg}</td></tr>`; $("runsExtra").textContent = ""; };
+      let d;
+      try { d = await apiGet(RUNS_API); } catch (e) { return empty("还没有运行记录，数据处理跑过之后会显示在这里"); }
+      const rows = Array.isArray(d) ? d : (d && (d.items || d.runs)) || [];
+      if (!rows.length) return empty("还没有运行记录，数据处理跑过之后会显示在这里");
+      $("runsExtra").textContent = `共 ${rows.length} 次`;
+      $("runsBody").innerHTML = rows.map(r => {
+        const st = r.started_at || r.start_time || "", en = r.ended_at || r.end_time || "";
+        const dur = r.duration_s != null ? r.duration_s * 1000 : (st && en ? toDate(en) - toDate(st) : null);
+        const steps = (r.steps || r.tasks || []).map(x => `<span style="margin-right:8px">${escHtml(x.name || x.task || x.task_id || "")} ${runTag(x.status || x.state)}</span>`).join("");
+        return `<tr><td>${escHtml(String(r.ds || r.dt || "—").slice(0, 10))}</td><td>${escHtml(String(st).slice(0, 16)) || "—"}</td><td>${dur != null ? fmtDur(dur) : "—"}</td><td>${runTag(r.status || r.state)}</td><td>${steps || '<span class="readonly-note">—</span>'}${r.error ? `<div class="readonly-note">${escHtml(r.error)}</div>` : ""}</td></tr>`;
+      }).join("");
+    }
+
     function route() {
       let r = (location.hash.match(/^#\/(\w+)/) || [])[1];
       if (!ROUTES[r]) r = "overview";
@@ -1101,6 +1131,7 @@
       document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + r));
       $("crumbGroup").textContent = g; $("crumbCur").textContent = n; $("pageTitle").textContent = n; $("pageDesc").textContent = d;
       requestAnimationFrame(resizeAll);
+      if (r === "runs") loadRuns();
     }
     const go = r => { location.hash = "#/" + r; };
     document.querySelectorAll(".nav li").forEach(li => li.onclick = () => go(li.dataset.route));
