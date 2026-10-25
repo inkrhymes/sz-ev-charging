@@ -543,13 +543,53 @@ def _forecast_window():
     return {"from": ts[0], "to": ts[-1]} if ts else None
 
 
+def _mysql_forecast_preds(taz_id):
+    """MySQL 模式优先读每日生产预测表 ads_forecast_zone_hour（forecast/daily.py 写入）。
+    返回 ({(taz_id, ts_hour): {"y_hat_lgbm": ..}}, forecast_window)；表不存在/为空时返回 ({}, None)，调用方退回 predictions.csv。"""
+    try:
+        conn = _mysql_connect()
+    except Exception:
+        return {}, None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MIN(ts_hour) AS t0, MAX(ts_hour) AS t1 FROM ads_forecast_zone_hour")
+            w = cur.fetchone() or {}
+            if not w.get("t0"):
+                return {}, None
+            cur.execute("SELECT taz_id, ts_hour, y_hat_lgbm FROM ads_forecast_zone_hour WHERE taz_id=%s", (taz_id,))
+            rows = cur.fetchall()
+    except Exception:  # 表还没建（老库）→ 静默退回 predictions.csv
+        return {}, None
+    finally:
+        conn.close()
+    preds = {(str(x["taz_id"]), _ts(x["ts_hour"])): {"y_hat_lgbm": x["y_hat_lgbm"]} for x in rows}
+    return preds, {"from": _ts(w["t0"]), "to": _ts(w["t1"])}
+
+
+@app.get("/api/forecast/metrics")
+def forecast_metrics():
+    """每日预测误差序列（forecast/evaluate.py 写入 ads_forecast_metric_daily）。非 MySQL 模式或无数据时 points 为空。"""
+    pts, src = [], "none"
+    if use_mysql():
+        r = _sql("SELECT ds, n, mae_lgbm, rmse_lgbm, mae_lag1, rmse_lag1, mae_lag24, model_version, drift "
+                 "FROM ads_forecast_metric_daily ORDER BY ds")
+        if r is not None:
+            src = "mysql"
+            pts = [{"ds": str(x["ds"])[:10], "n": x["n"], "mae_lgbm": _num(x["mae_lgbm"], 6),
+                    "rmse_lgbm": _num(x["rmse_lgbm"], 6), "mae_lag1": _num(x["mae_lag1"], 6),
+                    "rmse_lag1": _num(x["rmse_lag1"], 6), "mae_lag24": _num(x.get("mae_lag24"), 6),
+                    "model_version": x.get("model_version"), "drift": bool(x.get("drift"))} for x in r]
+    return ok({"source": src, "points": pts})
+
+
 @app.get("/api/baseline")
 def baseline():
     taz_id = request.args.get("taz_id")
     if use_mysql() and (r := _mysql_baseline(taz_id)) is not None:
-        preds = _forecast_preds()
+        db_preds, db_win = _mysql_forecast_preds(r["taz_id"])
+        preds = db_preds or _forecast_preds()
         return ok({**r, "points": _with_lgbm(r["points"], preds),
-                   "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
+                   "metrics": _forecast_metrics(), "forecast_window": db_win or _forecast_window()})
     if use_file():
         rows = _zone_rows()
         if not taz_id:

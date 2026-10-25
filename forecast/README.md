@@ -48,3 +48,27 @@ LightGBM 整体 MAE 降低约 10.6%，RMSE 降低约 20.1%。分片区看：331 
 ## 接口字段（已接入 `/api/baseline`）
 
 每个点多 `y_hat_lgbm`、`abs_err_lgbm`（不在预测的 2 月 27–28 日内为 null）；顶层多 `metrics`（`mae_lgbm`、`mae_lag1`、`rmse_lgbm`、`rmse_lag1`、`split_ts`）和 `forecast_window`。文件模式和 `API_SOURCE=mysql` 模式字段一样。详细说明见 `docs/architecture.md` 8.3 节。
+
+## 每日生产预测（`forecast/daily.py` + `forecast/evaluate.py`）
+
+每天两步，都是独立命令行，读 `$SZ_EV_LAKE`（默认 `data/lake`）：
+
+```bash
+python -m forecast.daily    --ds D      # 用截至 D 当天 23:00 的数据训练，预测 D+1 全天 24 小时
+python -m forecast.evaluate --ds D-1+1  # 即评估“昨天预测的今天”：--ds 填被评估的日期
+```
+
+| 命令 | 读 | 写 | 退出码 |
+|---|---|---|---|
+| `daily --ds D` | `ads/zone_hour/dt=D-84..D`（至少 14 天，D 当天必须有） | `ads/forecast_zone_hour/dt=D+1/part-0.parquet`；MySQL `ads_forecast_zone_hour`（D+1 整天先删后插） | 0 成功 / 2 输入不足 / 3 写库失败 |
+| `evaluate --ds D` | `ads/forecast_zone_hour/dt=D`、`ads/zone_hour/dt=D` 和 `dt=D-1` | `ads/forecast_metric_daily/dt=D`；MySQL `ads_forecast_metric_daily`（按天先删后插）；触发时 `dq_alert` 一条 `forecast_drift` | 0 正常（含告警）/ 2 输入不足 / 3 写库失败 |
+
+可选参数：`--no-db`（只写 Parquet）、`--train-days 56`、`--no-holiday`、`daily --out-dir`。建表语句在 `sql/ads/06_ads_forecast.sql`，脚本第一次写库时也会自动 `CREATE TABLE IF NOT EXISTS`。
+
+- **怎么预测一整天**：训练窗口是最近 56 天（再往前多读 29 天给 4 周同时刻均值用）。预测时逐小时递推，下一小时的 lag 用上一步的预测值。单次约 4 秒，峰值内存约 400 MB（2 线程）。
+- **基线 `y_hat_lag1`**：日前场景拿不到“上一小时的真实值”，所以基线是预测时最后一个已知值，24 小时都用它。评估时另算 `mae_lag24`（昨天同一时刻）作参考。
+- **没数据的片区**：331 个片区都会出行，但最近 7 天一个有效值都没有的片区，预测值留空（NULL）。
+- **节假日特征**：`forecast/calendar_cn.py` 提供 `is_holiday / is_adjusted_workday / is_offday`，覆盖 2022-23 年法定假日和调休，包括国庆 10-01~07、春节 2023-01-21~27。
+- **天气插口**：在 `daily.EXTRA_FEATURES` 里注册 `fn(ts, taz_id) -> DataFrame`，训练和预测时会自动带上新的列。
+- **漂移告警**（`evaluate.py`）：出现下面任一情况，就往 `dq_alert` 写一条 `layer=ads, severity=warn, rule_name=forecast_drift`：① 模型 MAE 连续 3 天比基线差；② 当天 MAE 超过前 28 天中位数的 1.5 倍（至少要有 7 天历史）。同一天重跑时，会先删掉当天还是 open 的旧告警。
+- **API**：MySQL 模式下，`/api/baseline` 的 `y_hat_lgbm` 和 `forecast_window` 优先读 `ads_forecast_zone_hour`，表不存在或为空时退回 `predictions.csv`，接口字段不变。`/api/forecast/metrics` 返回每天的误差序列 `{source, points:[{ds, n, mae_lgbm, rmse_lgbm, mae_lag1, rmse_lag1, mae_lag24, model_version, drift}]}`。
