@@ -371,6 +371,24 @@ def overview():
     )
 
 
+@app.get("/api/realtime/zones")
+def realtime_zones():
+    """准实时：每个片区最新一个 15 分钟窗口（rt_zone_occupancy，由 stream/zone_occupancy_stream.py 写入）。
+    只在 MySQL 模式下有数据；文件模式或表为空时返回空列表。"""
+    if not use_mysql():
+        return ok({"source": "none", "zones": []})
+    r = _sql("SELECT t.taz_id, t.window_start, t.window_end, t.occupancy, t.busy_sum, t.piles_sum, t.station_cnt,"
+             " t.write_ts, t.latency_ms FROM rt_zone_occupancy t JOIN (SELECT taz_id, MAX(window_end) AS we"
+             " FROM rt_zone_occupancy GROUP BY taz_id) m ON t.taz_id=m.taz_id AND t.window_end=m.we")
+    if r is None:
+        return ok({"source": "none", "zones": []})
+    zones = sorted(({"taz_id": str(x["taz_id"]), "window_start": _ts(x["window_start"]), "window_end": _ts(x["window_end"]),
+                     "occupancy": _num(x["occupancy"], 4), "busy_sum": x["busy_sum"], "piles_sum": x["piles_sum"],
+                     "station_cnt": x["station_cnt"], "write_ts": _ts(x["write_ts"])[:19], "latency_ms": x["latency_ms"]}
+                    for x in r), key=lambda z: int(z["taz_id"]) if z["taz_id"].isdigit() else 0)
+    return ok({"source": "mysql", "zones": zones})
+
+
 @app.get("/api/zones")
 def zones_list():
     if use_mysql() and (r := _mysql_zones()) is not None:
