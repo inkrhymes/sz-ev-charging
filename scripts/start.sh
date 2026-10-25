@@ -16,6 +16,9 @@ for f in sql/ods/*.sql sql/dwd/*.sql sql/ads/*.sql; do
 done
 
 echo "[3/5] 准备 demo CSV（缺失时由 ETL 重新生成）"
+if [ ! -f data/demo/dwd/dwd_station_5min_clean.csv ] && [ -f data/demo/dwd/dwd_station_5min_clean.csv.gz ]; then
+  gunzip -kf data/demo/dwd/dwd_station_5min_clean.csv.gz
+fi
 if [ ! -f data/demo/dwd/dwd_station_5min_clean.csv ]; then
   .venv/bin/python etl/load_ods.py && .venv/bin/python etl/clean_to_dwd.py
 fi

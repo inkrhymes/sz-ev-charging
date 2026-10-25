@@ -15,3 +15,5 @@ data/demo/**
 .DS_Store
 mysql_data/
 docs/开题报告_用户附件.docx
+!data/demo/dwd/
+!data/demo/dwd/dwd_station_5min_clean.csv.gz
