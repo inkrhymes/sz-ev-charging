@@ -263,6 +263,69 @@ def quality():
     )
 
 
+FORECAST = REPO / "forecast"
+
+
+def _forecast_preds():
+    """forecast/predictions.csv -> {(taz_id, ts_hour): row}。ts 为本地时间（UTC+8）字符串，与 dwd ts_hour 同格式。缺文件返回空。"""
+    path = FORECAST / "predictions.csv"
+    out = {}
+    try:
+        with path.open(newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                out[(str(r["taz_id"]).strip(), str(r["ts"]).strip()[:19])] = r
+    except (OSError, KeyError, ValueError):
+        return {}
+    return out
+
+
+def _forecast_metrics():
+    import json
+    keys = ("mae_lgbm", "mae_lag1", "rmse_lgbm", "rmse_lag1", "split_ts")
+    try:
+        m = json.loads((FORECAST / "metrics.json").read_text(encoding="utf-8"))
+        o = m.get("overall", {})
+        return {
+            "mae_lgbm": o.get("lgbm", {}).get("mae"),
+            "mae_lag1": o.get("lag1", {}).get("mae"),
+            "rmse_lgbm": o.get("lgbm", {}).get("rmse"),
+            "rmse_lag1": o.get("lag1", {}).get("rmse"),
+            "split_ts": m.get("split_ts"),
+        }
+    except (OSError, ValueError, AttributeError):
+        return {k: None for k in keys}
+
+
+def _with_lgbm(points, preds):
+    for p in points:
+        r = preds.get((str(p["taz_id"]), p["ts_hour"]))
+        try:
+            yh = round(float(r["y_hat_lgbm"]), 6) if r else None
+        except (TypeError, ValueError):
+            yh = None
+        p["y_hat_lgbm"] = yh
+        p["abs_err_lgbm"] = None if yh is None else round(abs(p["y_true"] - yh), 6)
+    return points
+
+
+def _pred_series(taz_id, preds):
+    """演示 CSV 不含预测窗口（2023-02）时，直接用 predictions.csv 的真值/上一小时值出点。"""
+    pts = []
+    for (z, ts), r in sorted(preds.items(), key=lambda kv: kv[0][1]):
+        if z != taz_id or not _in_range(ts):
+            continue
+        y = float(r["y"])
+        yl = float(r["y_hat_lag1"])
+        pts.append({"taz_id": taz_id, "ts_hour": ts, "y_true": round(y, 6),
+                    "y_hat_lag1": round(yl, 6), "abs_err": round(abs(y - yl), 6)})
+    return pts
+
+
+def _forecast_window():
+    ts = sorted({k[1] for k in _forecast_preds()})
+    return {"from": ts[0], "to": ts[-1]} if ts else None
+
+
 @app.get("/api/baseline")
 def baseline():
     taz_id = request.args.get("taz_id")
@@ -288,7 +351,11 @@ def baseline():
                 }
             )
             prev = y
-        return ok({"taz_id": taz_id, "points": points})
+        preds = _forecast_preds()
+        if not points and preds:
+            points = _pred_series(taz_id, preds)
+        return ok({"taz_id": taz_id, "points": _with_lgbm(points, preds),
+                   "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
     taz_id = taz_id or "1011"
     base = datetime.fromisoformat("2022-09-01T01:00:00")
     points = []
@@ -305,7 +372,8 @@ def baseline():
             }
         )
         prev = y
-    return ok({"taz_id": taz_id, "points": points})
+    return ok({"taz_id": taz_id, "points": _with_lgbm(points, {}),
+               "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
 
 
 @app.get("/api/tickets")
