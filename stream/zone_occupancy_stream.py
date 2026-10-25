@@ -41,6 +41,21 @@ def message_schema():
     ])
 
 
+def kafka_local_jars() -> list:
+    """解析 SZ_SPARK_JARS（默认 /workspace/jars/kafka 若存在），返回本地 jar 列表。"""
+    import glob
+    spec = os.getenv("SZ_SPARK_JARS")
+    if spec is None:
+        spec = "/workspace/jars/kafka" if os.path.isdir("/workspace/jars/kafka") else ""
+    out = []
+    for item in filter(None, (x.strip() for x in spec.split(","))):
+        if os.path.isdir(item):
+            out.extend(sorted(glob.glob(os.path.join(item, "*.jar"))))
+        else:
+            out.append(item)
+    return out
+
+
 def build_spark(source: str, app="sz-rt-zone-occupancy"):
     from pyspark.sql import SparkSession
     b = (SparkSession.builder.appName(app)
@@ -50,7 +65,11 @@ def build_spark(source: str, app="sz-rt-zone-occupancy"):
          .config("spark.sql.session.timeZone", "Asia/Shanghai")
          .config("spark.ui.enabled", "false"))
     if source == "kafka":
-        b = b.config("spark.jars.packages", os.getenv("SZ_KAFKA_PKG", KAFKA_PKG))
+        jars = kafka_local_jars()
+        if jars:  # 离线：SZ_SPARK_JARS=逗号分隔的 jar 或目录（目录取其中所有 *.jar）
+            b = b.config("spark.jars", ",".join(jars))
+        else:
+            b = b.config("spark.jars.packages", os.getenv("SZ_KAFKA_PKG", KAFKA_PKG))
     return b.getOrCreate()
 
 
