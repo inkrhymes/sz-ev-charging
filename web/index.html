@@ -395,7 +395,7 @@
     let usingOffline = true;
     let ticketList = [], ticketFilter = "all";
     let seriesPts = [], seriesTaz = "", seriesPage = 1;
-    let currentUser = { user: "访客", role: "readonly" };
+    let currentUser = { user: "访客", role: "readonly", token: "demo-readonly" };
 
     function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = "none", 2000); }
 
@@ -641,7 +641,7 @@
       try {
         if (!usingOffline) {
           const res = await fetch(`${API_BASE}/api/tickets/${id}`, {
-            method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next }),
+            method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentUser.token}` }, body: JSON.stringify({ status: next }),
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error);
@@ -709,7 +709,7 @@
     }
     async function saveAlert(id, status) {
       if (alertsOffline) return; // TODO 离线样例只在页面里改，刷新后恢复
-      const res = await fetch(`${API_BASE}/api/alerts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, role: currentUser.role }) });
+      const res = await fetch(`${API_BASE}/api/alerts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentUser.token}` }, body: JSON.stringify({ status }) });
       const json = await res.json(); if (!json.ok) throw new Error(json.error);
     }
     async function loadAlerts() { alertList = await fetchAlerts(); renderAlerts(); }
@@ -806,7 +806,7 @@
 
     /* ---------- 用户菜单 / 登录 ---------- */
     function setUser(d) {
-      currentUser = { user: d.user, role: d.role };
+      currentUser = { user: d.user, role: d.role, token: d.token || `demo-${d.role}` };
       const roleCn = d.role === "admin" ? "管理员" : "访客";
       $("userName").textContent = d.user; $("popName").textContent = d.user; $("popRole").textContent = roleCn;
       $("avatar").textContent = String(d.user).slice(0, 1).toUpperCase();
