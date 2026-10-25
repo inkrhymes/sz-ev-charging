@@ -43,10 +43,15 @@ jobs:
         run: |
           B=http://localhost:5000
           for i in $(seq 1 30); do curl -fs $B/api/health && break; sleep 2; done
-          curl -fs $B/api/health | grep -q '"ok":true'
-          curl -fs "$B/api/overview?dt=2022-09-01" | grep -q '"station_cnt":25'
-          test "$(curl -fs $B/api/zones | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["data"]))')" = 18
-          test "$(curl -fs "$B/api/zone/series?taz_id=1106" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["data"]["points"]))')" = 168
+          J() { curl -fs "$B$1" | python3 -c "import sys,json;d=json.load(sys.stdin);print($2)"; }
+          # parse JSON instead of grepping (health is pretty-printed since fd27af1)
+          test "$(J /api/health 'd["ok"]')" = True
+          # compose defaults API_SOURCE=mysql; fresh empty DB gets demo seed via start.sh -> must be real mysql, no silent fallback
+          test "$(J /api/health 'd["data"]["source"]')" = mysql
+          test "$(J /api/health 'd["data"]["fallback"]')" = False
+          test "$(J '/api/overview?dt=2022-09-01' 'd["data"]["station_cnt"]')" = 25
+          test "$(J /api/zones 'len(d["data"])')" = 18
+          test "$(J '/api/zone/series?taz_id=1106' 'len(d["data"]["points"])')" = 168
           curl -fs $B/ | grep -q '<title>'
       - name: logs on failure
         if: failure()
