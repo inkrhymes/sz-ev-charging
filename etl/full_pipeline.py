@@ -22,7 +22,7 @@ Peak memory ~= batch_days * n_stations * 288 rows (7 days, 1682 stations
 """
 from __future__ import annotations
 
-import argparse, os, shutil, time, datetime as _dt
+import argparse, json, os, shutil, time, datetime as _dt
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = Path("/workspace/thesis_ev_data/gdrive/UrbanEV/UrbanEVDataset/20220901-20230228_station-raw")
 LAKE = Path(os.environ.get("SZ_EV_LAKE", ROOT / "data" / "lake"))  # override to share one lake across clones
 HIGH_MISSING_THR = 0.30
+LOOKBACK_DAYS = 7  # stuck / IQR-outlier window: the day plus 6 previous days
 RAW_COLS = ["busy", "idle", "s_price", "e_price", "fast_busy", "fast_idle",
             "slow_busy", "slow_idle", "duration", "volume"]
 
@@ -54,23 +55,43 @@ def _stage_one(args):
     sid = int(Path(path).stem)
     df = pd.read_csv(path)
     df["ts"] = pd.to_datetime(df["time"]); df = df.drop(columns="time")
-    df = df[(df.ts >= start) & (df.ts < end)].reset_index(drop=True)
+    # Flags use a FIXED trailing window per day (LOOKBACK_DAYS incl. the day itself),
+    # read straight from the source CSV, so results do not depend on --start/--end.
+    df = df[(df.ts >= start - pd.Timedelta(days=LOOKBACK_DAYS - 1)) & (df.ts < end)].reset_index(drop=True)
+    miss_all = (df["busy"].isna() & df["idle"].isna()).to_numpy()
+    day = df.ts.dt.normalize()
+    days = pd.date_range(max(start, day.min()), end - pd.Timedelta(days=1), freq="D")
+    busy = df["busy"].to_numpy(float)
+    vb = np.where(miss_all, np.nan, busy)
+    stuck_day, fence = {}, {}
+    dvals = day.to_numpy()
+    for d in days:
+        w = (dvals >= np.datetime64(d - pd.Timedelta(days=LOOKBACK_DAYS - 1))) & (dvals <= np.datetime64(d))
+        x = vb[w]; x = x[~np.isnan(x)]
+        stuck_day[d] = int(len(x) >= 12 and np.unique(x).size == 1)
+        if len(x) >= 8:
+            q1, q3 = np.quantile(x, [.25, .75]); iqr = q3 - q1
+            fence[d] = (q1 - 1.5*iqr, q3 + 1.5*iqr) if iqr > 0 else None
+        else:
+            fence[d] = None
+    keep = (df.ts >= start).to_numpy()
+    df = df[keep].reset_index(drop=True); dvals = dvals[keep]; busy = busy[keep]
     if df.empty:
         return sid, 0, None
-    miss = df["busy"].isna() & df["idle"].isna()
-    valid = df.loc[~miss, "busy"]
-    stuck = int(len(valid) >= 12 and valid.nunique() == 1)
-    out_mask = np.zeros(len(df), bool)
-    x = valid.dropna()
-    if len(x) >= 8:
-        q1, q3 = x.quantile(.25), x.quantile(.75); iqr = q3 - q1
-        if iqr > 0:
-            b = df["busy"]; out_mask = (b.notna() & ((b < q1 - 1.5*iqr) | (b > q3 + 1.5*iqr))).to_numpy()
+    miss = pd.Series(miss_all[keep])
+    dser = pd.Series(dvals)
+    stuck_arr = dser.map(lambda d: stuck_day[pd.Timestamp(d)]).to_numpy()
+    lo = dser.map(lambda d: fence[pd.Timestamp(d)][0] if fence[pd.Timestamp(d)] else np.nan).to_numpy()
+    hi = dser.map(lambda d: fence[pd.Timestamp(d)][1] if fence[pd.Timestamp(d)] else np.nan).to_numpy()
+    with np.errstate(invalid="ignore"):
+        out_mask = ~np.isnan(busy) & ~np.isnan(lo) & ((busy < lo) | (busy > hi))
+    stuck_days = int(sum(stuck_day.values()))
+    stuck = int(stuck_days > 0)
     df.insert(0, "station_id", sid)
     df["taz_id"] = taz
     df["total_piles"] = piles
     df["is_row_missing"] = miss.astype("int8")
-    df["is_stuck"] = np.int8(stuck)
+    df["is_stuck"] = stuck_arr.astype("int8")
     df["is_outlier"] = out_mask.astype("int8")
     ok = (~miss) & df["busy"].notna() & (piles or 0) > 0
     df["occupancy"] = np.where(ok, df["busy"] / (piles if piles else np.nan), np.nan)
@@ -81,7 +102,7 @@ def _stage_one(args):
         run = run + 1 if v else 0; best = max(best, run)
     df.to_parquet(out / f"{sid}.parquet", index=False)
     stat = dict(station_id=sid, taz_id=taz, rows=len(df), missing_rows=int(m.sum()),
-                missing_rate=round(float(m.mean()), 6), stuck_flag=stuck,
+                missing_rate=round(float(m.mean()), 6), stuck_flag=stuck, stuck_days=stuck_days,
                 outlier_rows=int(out_mask.sum()), gap_days_max=int(round(best*5/1440)))
     return sid, len(df), stat
 
@@ -98,6 +119,7 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--batch-days", type=int, default=7)
     ap.add_argument("--layer", choices=["ods", "dwd", "all"], default="all", help="which partitions to (re)write")
+    ap.add_argument("--write-report", action="store_true", help="also rewrite docs/full_load_metrics.md and docs/quality_report_full.md")
     ap.add_argument("--keep-staging", action="store_true")
     ap.add_argument("--ds", help="single day YYYY-MM-DD (overrides --start/--end)")
     a = ap.parse_args()
@@ -163,10 +185,20 @@ def main():
                                    np.where(q.missing_rate > HIGH_MISSING_THR, "inspect", "none"))
     qdir = LAKE / "dwd" / "quality_station" / f"run={tag}"; qdir.mkdir(parents=True, exist_ok=True)
     q.to_parquet(qdir / "part-0.parquet", index=False)
-    write_quality(q, a, tag)
+    if a.write_report:
+        write_quality(q, a, tag)
     m["report"] = dict(secs=time.time()-t)
     if not a.keep_staging: shutil.rmtree(stg, ignore_errors=True)
-    write_metrics(m, a, tag)
+    run = dict(args=vars(a), finished=_dt.datetime.now().isoformat(timespec="seconds"), metrics=m,
+               quality=dict(stations=len(q), rows=int(q.rows.sum()), missing_rows=int(q.missing_rows.sum()),
+                            outlier_rows=int(q.outlier_rows.sum()), stuck_stations=int(q.stuck_flag.sum()),
+                            stuck_station_days=int(q.stuck_days.sum()),
+                            repair=int((q.ticket_suggest == "repair").sum()), inspect=int((q.ticket_suggest == "inspect").sum())))
+    rd = LAKE / "_runs"; rd.mkdir(parents=True, exist_ok=True)
+    (rd / f"{tag}_{_dt.datetime.now():%Y%m%dT%H%M%S}_{os.getpid()}.json").write_text(json.dumps(run, indent=2, default=str))
+    print("quality", run["quality"], flush=True)
+    if a.write_report:
+        write_metrics(m, a, tag)
 
 
 def write_quality(q, a, tag):
@@ -174,14 +206,14 @@ def write_quality(q, a, tag):
     tazs = q.taz_id.nunique()
     lines = [f"# 全量数据质检报告（{a.start} ~ {a.end}）", "",
              "由 `etl/full_pipeline.py` 生成，规则与演示子集一致（`etl/clean_to_dwd.py`）：整行缺失 = busy 与 idle 均为空；"
-             "卡死 = 窗口内有效 busy 只有一个取值（≥12 点）；异常 = busy 超出站内 IQR 1.5 倍边界；"
+             "卡死 = 某天及其前 6 天（共 7 天）的有效 busy 只有一个取值（≥12 点），按站按天标记；异常 = busy 超出该站同一 7 天窗口的 IQR 1.5 倍边界；"
              f"缺失率 > {HIGH_MISSING_THR:.0%} 建议巡检，卡死建议维修。", "",
              "| 指标 | 数值 |", "|---|---|",
              f"| 站点数 | {len(q)} |", f"| 片区数（TAZ） | {tazs} |",
              f"| 总行数 | {tot:,} |", f"| 缺失行数 | {miss:,} |",
              f"| 整体缺失率 | {miss/tot:.2%} |",
              f"| 异常点行数 | {q.outlier_rows.sum():,} ({q.outlier_rows.sum()/tot:.2%}) |",
-             f"| 卡死站点 | {int(q.stuck_flag.sum())} |",
+             f"| 卡死站点（至少一天卡死） | {int(q.stuck_flag.sum())} |", f"| 卡死站·天 | {int(q.stuck_days.sum())} |",
              f"| 高缺失站点（>{HIGH_MISSING_THR:.0%}） | {int((q.missing_rate>HIGH_MISSING_THR).sum())} |",
              f"| 全部缺失的站点 | {int((q.missing_rate>=1).sum())} |",
              f"| 建议工单：维修 / 巡检 | {int((q.ticket_suggest=='repair').sum())} / {int((q.ticket_suggest=='inspect').sum())} |",
