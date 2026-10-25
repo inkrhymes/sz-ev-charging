@@ -86,7 +86,7 @@ def test_map_slider_and_ticket_flow(browser):
 
 
 def test_runs_page_empty_or_list(browser):
-    """调度运行页：接口还没上线时显示空状态（允许 /api/runs 404），有记录时出表格；都不能有 JS 报错。"""
+    """调度运行页：接口还没上线时显示空状态（允许 /api/ops/runs 和 /api/runs 404），有记录时出表格；都不能有 JS 报错。"""
     pg, probs = open_page(browser)
     pg.goto(f"{UI_BASE}#/runs")
     pg.wait_for_load_state("networkidle")
@@ -94,7 +94,7 @@ def test_runs_page_empty_or_list(browser):
     body = pg.inner_text("#runsBody")
     assert "加载中" not in body and body.strip()
     assert not probs["js"], probs["js"]
-    assert not [u for u in probs["api"] if "/api/runs" not in u], probs["api"]
+    assert not [u for u in probs["api"] if "/runs" not in u], probs["api"]
     assert not BANNED.findall(pg.evaluate("document.body.innerText"))
     pg.close()
 
@@ -107,11 +107,18 @@ def test_runs_page_renders_fixture(browser):
                                    "steps": [{"name": "清洗", "status": "success"}, {"name": "汇总", "status": "success"}]},
                                   {"ds": "2023-02-27", "status": "failed", "started_at": "2026-10-24 02:00:00", "duration_s": 95,
                                    "steps": [{"name": "清洗", "status": "failed"}], "error": "源文件缺失"}]}
-    pg.route("**/api/runs*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(fake)))
+    day = {"ok": True, "data": {"ds": "2023-02-27", "status": "failed", "steps": [
+        {"name": "清洗", "status": "failed", "started_at": "2026-10-24 02:00:00", "ended_at": "2026-10-24 02:01:35", "duration_s": 95, "error": "源文件缺失"}]}}
+    pg.route("**/api/ops/runs", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(fake)))
+    pg.route("**/api/ops/runs/*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(day)))
     pg.goto(f"{UI_BASE}#/runs")
     pg.wait_for_timeout(1500)
     t = pg.inner_text("#runsBody")
     assert "2023-02-28" in t and "成功" in t and "失败" in t and "12.5 分钟" not in t and "源文件缺失" in t
+    pg.click('a[data-run="2023-02-27"]')
+    pg.wait_for_timeout(800)
+    d = pg.inner_text("#runsBody")
+    assert "02:01:35" in d and "步骤" in d
     assert not probs["js"], probs["js"]
     pg.screenshot(path="/tmp/runs_fixture.png")
     pg.close()
@@ -138,4 +145,21 @@ def test_site_page_fixture(browser):
     assert n == [2, 1, 1]
     assert not probs["js"], probs["js"]
     assert not BANNED.findall(pg.evaluate("document.body.innerText"))
+    pg.close()
+
+
+def test_ticket_flow_uses_started_at(browser):
+    """工单有 started_at 时，经过里的「开始处理」用它，统计里多出等待/处理两项；没有时照旧。"""
+    pg, probs = open_page(browser)
+    pg.goto(f"{UI_BASE}#/overview")
+    pg.wait_for_timeout(1000)
+    html = pg.evaluate("""() => ticketFlow({ticket_id: 1, station_id: 1, status: "done", created_at: "2026-10-01 08:00:00",
+        started_at: "2026-10-01 09:00:00", updated_at: "2026-10-01 11:00:00"})""")
+    assert "2026-10-01 09:00:00" in html and "等了 1 小时" in html and "动手后用了 2 小时" in html
+    old = pg.evaluate("""() => ticketFlow({ticket_id: 2, station_id: 1, status: "done", created_at: "2026-10-01 08:00:00", updated_at: "2026-10-01 11:00:00"})""")
+    assert "没有单独记时间" in old
+    stats = pg.evaluate("""() => { ticketList = [{ticket_id: 1, status: "done", created_at: "2026-10-01 08:00:00", started_at: "2026-10-01 09:00:00",
+        updated_at: "2026-10-01 11:00:00"}]; renderTicketTime(); return document.getElementById("ticketTime").innerText; }""")
+    assert "平均等多久开始处理" in stats and "开始处理后平均多久完成" in stats
+    assert not probs["js"], probs["js"]
     pg.close()

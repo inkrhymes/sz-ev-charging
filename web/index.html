@@ -755,8 +755,8 @@
         a ? step("ok", "发现问题", `${a.ds ? `数据日期 ${String(a.ds).slice(0, 10)}<br>` : ""}${a.created_at || ""} · AL-${String(a.alert_id).padStart(4, "0")}`)
           : step("", "发现问题", t.alert_id != null ? `AL-${String(t.alert_id).padStart(4, "0")}（告警没加载到）` : "手动开的单，没有对应告警"),
         step("ok", "派工单", t.created_at || "—"),
-        step(st === "processing" ? "on" : st === "done" ? "ok" : "", "开始处理", st === "processing" ? (t.updated_at || "—") : st === "done" ? noTime : "还没开始"),
-        step(st === "done" ? "ok" : "", "处理完成", st === "done" ? `${t.updated_at || "—"}<br>用时 ${fmtDur(toDate(t.updated_at) - toDate(t.created_at))}` : "还没完成"),
+        step(st === "processing" ? "on" : st === "done" ? "ok" : "", "开始处理", t.started_at && st !== "open" ? `${t.started_at}<br>派单后等了 ${fmtDur(toDate(t.started_at) - toDate(t.created_at))}` : st === "processing" ? (t.updated_at || "—") : st === "done" ? noTime : "还没开始"),
+        step(st === "done" ? "ok" : "", "处理完成", st === "done" ? `${t.updated_at || "—"}<br>${t.started_at ? `动手后用了 ${fmtDur(toDate(t.updated_at) - toDate(t.started_at))}，` : ""}从派单算一共 ${fmtDur(toDate(t.updated_at) - toDate(t.created_at))}` : "还没完成"),
         a && a.status === "closed" ? step("ok", /自动关闭/.test(a.note || "") ? "复查通过，自动关闭" : "告警已关闭", `${a.updated_at || ""}${a.note ? `<br>${escHtml(a.note)}` : ""}`)
           : step("", "告警关闭", a ? "告警还没关，复查通过后会自动关" : "—"),
       ];
@@ -767,9 +767,15 @@
       const left = ticketList.filter(t => t.status !== "done" && t.created_at).map(t => Date.now() - toDate(t.created_at)).filter(v => !isNaN(v));
       const avg = done.length ? done.reduce((x, y) => x + y, 0) / done.length : null;
       const mid = done.length ? done[Math.floor((done.length - 1) / 2)] : null;
+      const gap = (list, a, b) => list.filter(t => t[a] && t[b]).map(t => toDate(t[b]) - toDate(t[a])).filter(v => !isNaN(v) && v >= 0);
+      const mean = v => v.length ? v.reduce((x, y) => x + y, 0) / v.length : null;
+      const wait = gap(ticketList.filter(t => t.status !== "open"), "created_at", "started_at");
+      const work = gap(ticketList.filter(t => t.status === "done"), "started_at", "updated_at");
       const closed = ticketList.filter(t => t.alert_id != null && (alertList.find(a => a.alert_id === t.alert_id) || {}).status === "closed").length;
       const items = [[fmtDur(avg), `平均用时（${done.length} 张已完成）`], [fmtDur(mid), "一半工单在这个时间内完成"], [done.length ? fmtDur(done[done.length - 1]) : "—", "最慢的一张"],
         [left.length ? fmtDur(Math.max(...left)) : "—", `没完成的单里等得最久的（${left.length} 张）`], [String(closed), "对应告警已关闭"]];
+      if (wait.length) items.splice(1, 0, [fmtDur(mean(wait)), `派单后平均等多久开始处理（${wait.length} 张）`]);
+      if (work.length) items.splice(2, 0, [fmtDur(mean(work)), `开始处理后平均多久完成（${work.length} 张）`]);
       $("ticketTime").innerHTML = ticketList.length ? items.map(([v, n]) => `<div><b class="num">${v}</b><span>${n}</span></div>`).join("") : `<span class="readonly-note">暂无工单</span>`;
     }
     function renderTickets(list) {
@@ -1164,7 +1170,8 @@
     charts.chartSite.on("click", p => { if (p.data && p.data.raw) { const r = p.data.raw; siteFilter = "all"; const i = siteRows.indexOf(r); sitePage = Math.floor(i / 10) + 1; siteOpen.add(String(r.taz_id)); renderSite(); } });
 
     /* ---------- 调度运行（运行记录接口还在做，先按常见字段兼容展示；没有接口或没有记录时显示空状态） ---------- */
-    const RUNS_API = "/api/runs";
+    const RUNS_API = "/api/ops/runs";
+    const openRuns = new Set();
     const RUN_ST = { success: ["成功", "success"], ok: ["成功", "success"], failed: ["失败", "danger"], fail: ["失败", "danger"], error: ["失败", "danger"],
       running: ["运行中", "blue"], skipped: ["跳过", "gray"], queued: ["排队中", "gray"] };
     const runTag = s => { const [cn, c] = RUN_ST[String(s || "").toLowerCase()] || [s || "未知", "gray"]; return `<span class="tag ${c}">${escHtml(cn)}</span>`; };
@@ -1173,7 +1180,8 @@
       runsLoaded = true;
       const empty = msg => { $("runsBody").innerHTML = `<tr><td colspan="5" class="empty">${msg}</td></tr>`; $("runsExtra").textContent = ""; };
       let d;
-      try { d = await apiGet(RUNS_API); } catch (e) { return empty("还没有运行记录，数据处理跑过之后会显示在这里"); }
+      try { d = await apiGet(RUNS_API); } catch (e) { try { d = await apiGet("/api/runs"); } catch (e2) { d = null; } }
+      if (d == null) return empty("还没有运行记录，数据处理跑过之后会显示在这里");
       const rows = Array.isArray(d) ? d : (d && (d.items || d.runs)) || [];
       if (!rows.length) return empty("还没有运行记录，数据处理跑过之后会显示在这里");
       $("runsExtra").textContent = `共 ${rows.length} 次`;
@@ -1181,8 +1189,24 @@
         const st = r.started_at || r.start_time || "", en = r.ended_at || r.end_time || "";
         const dur = r.duration_s != null ? r.duration_s * 1000 : (st && en ? toDate(en) - toDate(st) : null);
         const steps = (r.steps || r.tasks || []).map(x => `<span style="margin-right:8px">${escHtml(x.name || x.task || x.task_id || "")} ${runTag(x.status || x.state)}</span>`).join("");
-        return `<tr><td>${escHtml(String(r.ds || r.dt || "—").slice(0, 10))}</td><td>${escHtml(String(st).slice(0, 16)) || "—"}</td><td>${dur != null ? fmtDur(dur) : "—"}</td><td>${runTag(r.status || r.state)}</td><td>${steps || '<span class="readonly-note">—</span>'}${r.error ? `<div class="readonly-note">${escHtml(r.error)}</div>` : ""}</td></tr>`;
+        const ds = String(r.ds || r.dt || "").slice(0, 10);
+        return `<tr><td>${ds ? `<a data-run="${escHtml(ds)}">${escHtml(ds)}</a>` : "—"}</td><td>${escHtml(String(st).slice(0, 16)) || "—"}</td><td>${dur != null ? fmtDur(dur) : "—"}</td><td>${runTag(r.status || r.state)}</td><td>${steps || '<span class="readonly-note">—</span>'}${r.error ? `<div class="readonly-note">${escHtml(r.error)}</div>` : ""}</td></tr>`
+          + (openRuns.has(ds) ? `<tr class="flow-row"><td colspan="5" id="runDay-${escHtml(ds)}"><span class="readonly-note">加载中…</span></td></tr>` : "");
       }).join("");
+      $("runsBody").querySelectorAll("a[data-run]").forEach(a => a.onclick = () => { const k = a.dataset.run; openRuns.has(k) ? openRuns.delete(k) : openRuns.add(k); loadRuns(); });
+      openRuns.forEach(loadRunDay);
+    }
+    async function loadRunDay(ds) {
+      const box = () => document.getElementById("runDay-" + ds);
+      let r;
+      try { r = await apiGet(`${RUNS_API}/${encodeURIComponent(ds)}`); } catch (e) { if (box()) box().innerHTML = `<span class="readonly-note">这一天的明细取不到</span>`; return; }
+      r = (r && (r.run || r.item)) || r || {};
+      const steps = r.steps || [];
+      if (!box()) return;
+      box().innerHTML = steps.length ? `<table class="sub"><thead><tr><th>步骤</th><th>开始</th><th>结束</th><th>用时</th><th>结果</th></tr></thead><tbody>${steps.map(x => {
+        const dur = x.duration_s != null ? x.duration_s * 1000 : (x.started_at && x.ended_at ? toDate(x.ended_at) - toDate(x.started_at) : null);
+        return `<tr><td>${escHtml(x.name || "")}</td><td>${escHtml(String(x.started_at || "—").slice(11, 19) || "—")}</td><td>${escHtml(String(x.ended_at || "—").slice(11, 19) || "—")}</td><td>${dur != null ? fmtDur(dur) : "—"}</td><td>${runTag(x.status)}${x.error ? `<div class="readonly-note">${escHtml(x.error)}</div>` : ""}</td></tr>`;
+      }).join("")}</tbody></table>` : `<span class="readonly-note">这一天没有记下步骤</span>`;
     }
 
     function route() {
