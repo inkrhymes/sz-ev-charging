@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -20,6 +21,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from quality import engine  # noqa: E402
+from orchestration import run_log  # noqa: E402
 
 DEMO = ROOT / "data" / "demo"
 REAL_LAKE = Path(os.getenv("SZ_EV_LAKE", ROOT / "data" / "lake"))
@@ -126,16 +128,39 @@ CHAIN = [
 ]
 
 
-def run_chain(ds: str, write_db: bool = True) -> list[tuple[str, str, float]]:
-    """顺序执行整条链路；任何任务异常（含 DQBlockError）立即停止，下游标记 skipped。"""
+def recorded(name: str, fn, source: str = "airflow"):
+    """包一层运行记录：开始/结束/状态/拦截原因写 ops_task_run，异常照常抛出（Airflow 据此判失败）。"""
+    # 只接 ds/write_db：Airflow 遇到 **kwargs 会把整个 context 塞进来
+    def wrapper(ds: str, write_db: bool = True):
+        start = datetime.now()
+        try:
+            out = fn(ds, write_db=write_db) if name.startswith("dq_") else fn(ds)
+        except Exception as e:
+            if write_db:
+                state = "blocked" if isinstance(e, engine.DQBlockError) else "failed"
+                run_log.record(name, ds, state, start, datetime.now(), run_log.reason_from_exc(name, ds, e), source)
+            raise
+        if write_db:
+            run_log.record(name, ds, "success", start, datetime.now(), None, source)
+        return out
+    wrapper.__name__ = name
+    return wrapper
+
+
+def run_chain(ds: str, write_db: bool = True, source: str = "run_day") -> list[tuple[str, str, float]]:
+    """顺序执行整条链路；任何任务异常（含 DQBlockError）立即停止，下游标记 skipped。
+    write_db=True 时每个任务的运行情况写入 ops_task_run（被跳过的下游也写一行 skipped）。"""
     timings, failed = [], False
     for name, fn in CHAIN:
         if failed:
             timings.append((name, "skipped", 0.0))
+            if write_db:
+                now = datetime.now()
+                run_log.record(name, ds, "skipped", now, now, "上游任务未通过，本步未执行", source)
             continue
         t0 = time.perf_counter()
         try:
-            fn(ds, write_db=write_db) if name.startswith("dq_") else fn(ds)
+            recorded(name, fn, source)(ds, write_db=write_db)
             timings.append((name, "success", time.perf_counter() - t0))
         except Exception as e:
             print(f"[fail] {name}: {e}", flush=True)

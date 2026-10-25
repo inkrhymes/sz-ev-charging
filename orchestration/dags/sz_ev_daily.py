@@ -48,12 +48,13 @@ with DAG(
     tags=["sz_ev", "daily"],
 ) as dag:
     def build(name, fn):
-        return PythonOperator(task_id=name, python_callable=fn, op_kwargs={"ds": "{{ ds }}"})
+        return PythonOperator(task_id=name, python_callable=tasks.recorded(name, fn, "airflow"),
+                              op_kwargs={"ds": "{{ ds }}"})
 
     def gate(layer):
         # 质检失败直接抛 DQBlockError，不需要重试
-        return PythonOperator(task_id=f"dq_{layer}", python_callable=tasks.dq,
-                              op_kwargs={"layer": layer, "ds": "{{ ds }}"}, retries=0)
+        return PythonOperator(task_id=f"dq_{layer}", python_callable=tasks.recorded(f"dq_{layer}", dict(tasks.CHAIN)[f"dq_{layer}"], "airflow"),
+                              op_kwargs={"ds": "{{ ds }}"}, retries=0)
 
     chain = [build("ods_ingest", tasks.ods_ingest), gate("ods"),
              build("dwd_build", tasks.dwd_build), gate("dwd"),

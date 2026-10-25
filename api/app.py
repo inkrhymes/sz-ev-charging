@@ -1174,6 +1174,11 @@ def map_hourly():
     return ok({"date": day, "zones": dict(out)})
 
 
+# 调度运行 / 监控接口（只读）：见 api/ops.py
+import ops as _ops  # noqa: E402
+_ops.register(app, lambda q, a=(): _sql(q, a), ok, err)  # lambda：测试可 monkeypatch app._sql
+
+
 # 必须放在文件末尾：python app.py 时 app.run() 会阻塞，写在它后面的路由（地图、告警）不会注册。
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

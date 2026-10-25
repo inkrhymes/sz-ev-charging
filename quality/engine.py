@@ -430,8 +430,10 @@ def check(layer, ds, df, prev_df=None, write_db=True, run_id=None, rules_dir=RUL
             log(f"[dq] 写 dq_run_log 失败（不影响判定）: {e}")
     failed = [r for r in results if not r.passed and r.severity == "block"]
     if failed:
-        raise DQBlockError(f"{layer} {ds}: {len(failed)} 条 block 规则失败: "
-                           + ", ".join(r.rule_name for r in failed))
+        e = DQBlockError(f"{layer} {ds}: {len(failed)} 条 block 规则失败: "
+                         + ", ".join(r.rule_name for r in failed))
+        e.failed = failed  # 调度运行记录用它生成拦截原因
+        raise e
     return results
 
 
