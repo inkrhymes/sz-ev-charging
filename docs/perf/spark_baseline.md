@@ -98,7 +98,21 @@ export_ads_mysql.py --ds 2022-09-01，真实写回 sz_ev，总耗时 8.5s：
 | Q4 地图片区日汇总 | 1.195 / 1.621 | 主键 ref | 1.148 / 1.563 | 1.802 / 2.373 | 主键 ref（未改动） |
 | Q5 片区内站点 | 0.139 / 0.166 | idx_dim_station_taz | 0.146 / 0.209 | 0.195 / 0.422 | 同左（未改动） |
 
-最终保留 `sql/ads/05_ads_time_indexes.sql` 中的两个覆盖索引。Q1 加速约 2.3 倍，Q2 变化不大。Q3–Q5 的索引没有改动，前后差异属于测量波动。数据量只有万行级别，绝对耗时都在毫秒级；全区间约 134 万行时差异会更明显，但这次没有实测。
+最终保留 `sql/ads/05_ads_time_indexes.sql` 中的两个覆盖索引。Q1 加速约 2.3 倍，Q2 变化不大。Q3–Q5 的索引没有改动，前后差异属于测量波动。数据量只有万行级别，绝对耗时都在毫秒级；全区间实测见 §5.1。
+
+### 5.1 全区间实测（2022-09-01..2023-02-28 全量写回后）
+
+测试条件：sz_ev 库已清掉演示行，只含全量：ads_zone_occupancy_hour 1,338,568 行，ads_baseline_naive 1,338,568 行，ads_zone_daily 59,911 行，dim_station 1,682 行。查询与上表相同（取 2022-09-01 当天），预热 5 次，再计时 50 次，取中位数和 P95（毫秒），客户端是本机 pymysql，计时前做过 ANALYZE TABLE。
+
+| 查询 | 加索引前 中位/P95 | 执行计划 | 仅 (ts_hour) 单列索引 | 覆盖索引后 中位/P95 | 执行计划 |
+|---|---|---|---|---|---|
+| Q1 城市小时曲线（当日，跨片区） | 221.480 / 244.047 | 全表扫描（估 1,011,939 行） | 7.799 / 10.030 | 1.983 / 2.427 | range idx_zoh_ts_occ |
+| Q2 基线当日平均误差 | 220.175 / 241.574 | 全表扫描（估 1,125,062 行） | 7.190 / 9.099 | 1.534 / 1.830 | range idx_bl_ts_err |
+| Q3 单片区时间序列 | 0.200 / 0.252 | 主键 range | 0.174 / 0.237 | 0.175 / 0.277 | 主键 range |
+| Q4 地图片区日汇总 | 1.479 / 2.140 | 主键 ref | 0.958 / 1.323 | 1.086 / 1.450 | 主键 ref（未改动） |
+| Q5 片区内站点 | 0.170 / 0.210 | idx_dim_station_taz | 0.142 / 0.283 | 0.136 / 0.189 | 同左（未改动） |
+
+全量下覆盖索引让 Q1 快约 112 倍（221.5→2.0 ms），Q2 快约 144 倍（220.2→1.5 ms）。单列 (ts_hour) 索引在全量下也比全表扫描快（约 7–8 ms），但仍比覆盖索引慢 3–5 倍。Q3–Q5 的索引没有改动，前后差异属于测量波动。
 
 ## 6. quality_summary 增量化前后（ads_build --ds 2022-09-01，真实湖 181 个 dwd 分区，local[2] / driver 2g）
 
@@ -111,3 +125,9 @@ export_ads_mysql.py --ds 2022-09-01，真实写回 sz_ev，总耗时 8.5s：
 | 改后日常增量（仅 ds 当天） | 1 / 0.48 | 2.05 | 16 |
 
 结果校验（与改前一致）：stuck_station_cnt 6，row_missing_rate 0.114230，high_missing_station_cnt 180，station_cnt 1682。
+
+### 6.1 全区间 ads_build（--start 2022-09-01 --end 2023-02-28，2db48a3 重跑后的真实湖）
+
+总墙钟 122 s。各步：register_ext_dwd 87,679,296 行 4.11s；zone_hour 1,338,568 行 27.4s；quality_station_day 304,442 行 48.19s；zone_occupancy_hour 3.57s；baseline_naive 6.13s；city_overview 181 行 5.11s；zone_daily 59,911 行 4.42s；station_busy_day 181 天 4.98s；quality_summary 3.42s；落湖 ads/zone_hour 2.59s、ads/zone_daily 1.39s。
+写回 MySQL（export_ads_mysql --start/--end，写回前先清空 5 张 ads 表的演示行）总墙钟 63 s：city_overview 181 行 6.37s，zone_occupancy_hour 1,338,568 行 23.63s，baseline_naive 1,338,568 行 27.14s，zone_daily 59,911 行 2.75s，dim_station 1,682 行 0.17s，quality_summary 4 行 0.17s。
+全量 quality_summary：station_cnt 1682，row_missing_rate 0.211628，stuck_station_cnt 6，high_missing_station_cnt 259。
