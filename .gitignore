@@ -29,3 +29,4 @@ spark/_metastore/
 spark/_runs/
 derby.log
 spark-warehouse/
+data/mysql/

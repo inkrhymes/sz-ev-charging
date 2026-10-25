@@ -18,6 +18,7 @@ services:
       AIRFLOW__CORE__DAGS_FOLDER: /repo/orchestration/dags
       REPO_ROOT: /repo
       MYSQL_HOST: 127.0.0.1
+      TZ: Asia/Shanghai
       SZ_EV_LAKE: /workspace/sz-ev-charging/data/lake
       JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
       SZ_DRIVER_MEM: 2g

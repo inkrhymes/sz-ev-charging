@@ -10,7 +10,8 @@ services:
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      # 绑定挂载到宿主目录（已 gitignore），box 重启/重装 docker 后数据仍在
+      - ${MYSQL_DATA_DIR:-./data/mysql}:/var/lib/mysql
       - ./sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
@@ -44,5 +45,3 @@ services:
       mysql:
         condition: service_healthy
 
-volumes:
-  mysql_data:

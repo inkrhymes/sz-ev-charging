@@ -18,11 +18,17 @@ docker compose up -d mysql
 until [ "$(docker inspect -f '{{.State.Health.Status}}' sz-ev-mysql)" = healthy ]; do sleep 2; done
 
 echo "[2/5] 建表与指标视图（ods -> dwd -> ads）"
-for f in sql/ods/*.sql sql/dwd/*.sql sql/ads/*.sql; do
+for f in sql/ods/*.sql sql/dwd/*.sql sql/ads/*.sql quality/sql/dq_alert.sql quality/sql/dq_run_log.sql; do
+  case "$f" in *14_seed_tickets.sql) continue;; esac   # 演示工单随 demo 装载一起处理
   echo "  $f"
   docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 "$MYSQL_DATABASE" < "$f"
 done
 
+# 只给空库装 demo：ads_zone_occupancy_hour 已有数据（如真实 181 天）或 SKIP_DEMO_SEED=1 时跳过 3/4 步
+ADS_ROWS=$(docker exec sz-ev-mysql mysql -N -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -e "SELECT COUNT(*) FROM ads_zone_occupancy_hour" 2>/dev/null || echo 0)
+if [ "${SKIP_DEMO_SEED:-0}" = 1 ] || [ "${ADS_ROWS:-0}" -gt 0 ]; then
+  echo "[3-4/5] 跳过 demo 装载（SKIP_DEMO_SEED=${SKIP_DEMO_SEED:-0}, ads 行数=${ADS_ROWS}）"
+else
 echo "[3/5] 准备 demo CSV（缺失时由 ETL 重新生成）"
 for f in data/demo/ods/ods_station_raw_5min.csv data/demo/ods/ods_station_info.csv; do
   if [ ! -f "$f" ] && [ -f "$f.gz" ]; then gunzip -kf "$f.gz"; fi
@@ -36,6 +42,8 @@ fi
 
 echo "[4/5] 装载 CSV 到 MySQL 并回填 ads"
 MYSQL_USER=root MYSQL_PASSWORD="$MYSQL_ROOT_PASSWORD" "$PY" etl/load_mysql_from_demo.py
+docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 "$MYSQL_DATABASE" < sql/ads/14_seed_tickets.sql
+fi
 
 echo "[5/5] 启动 API 与大屏"
 docker compose up -d --build api
