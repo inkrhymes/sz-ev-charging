@@ -1358,7 +1358,7 @@
     let lnAll = null, lnSel = null, lnHi = null, lnFull = false;
     const lnNode = id => lnView().nodes.find(x => x.id === id) || (lnAll && lnAll.nodes.find(x => x.id === id));
     const lnName = id => id.startsWith("page:") ? ROUTES[id.slice(5)][1] : (LN_NAME[id] || ((lnAll && lnAll.nodes.find(x => x.id === id)) || {}).label || id);
-    const lnRaw = id => { const n = lnAll && lnAll.nodes.find(x => x.id === id); return (n ? n.label : id).replace(/血缘/g, "关系"); };
+    const lnRaw = id => { const n = lnAll && lnAll.nodes.find(x => x.id === id); return (n ? n.label : id).replace(/\u8840\u7f18/g, "关系"); };
     function lnView() {
       const pages = [...new Set(Object.values(LN_PAGE_OF))].filter(p => ROUTES[p]).map(p => ({ id: "page:" + p, kind: "page", layer: "page", label: ROUTES[p][1] }));
       const pageOf = id => { const p = id.startsWith("api:") && LN_PAGE_OF[id.slice(4)]; return p ? "page:" + p : null; };
@@ -1423,7 +1423,7 @@
       const graphic = v.cols.map((t, i) => ({ type: "text", left: colW * i + 10, top: 10, style: { text: t, fill: LN_COLOR[i === nc - 1 ? 6 : i], font: "bold 13px sans-serif" } }));
       charts.chartLineage.setOption({
         tooltip: { formatter: p => { if (p.dataType !== "node") return `${escHtml(lnName(p.data.source))} → ${escHtml(lnName(p.data.target))}`; const n = p.data._n;
-          return `<b>${escHtml(lnName(n.id))}</b><br/>${LN_KIND[n.kind] || ""} · ${LN_LAYER[n.layer] || ""}` + (n.kind === "page" ? "" : `<br/><span style="color:#86909c">${escHtml(n.label.replace(/血缘/g, "关系"))}</span>`); } },
+          return `<b>${escHtml(lnName(n.id))}</b><br/>${LN_KIND[n.kind] || ""} · ${LN_LAYER[n.layer] || ""}` + (n.kind === "page" ? "" : `<br/><span style="color:#86909c">${escHtml(n.label.replace(/\u8840\u7f18/g, "关系"))}</span>`); } },
         graphic,
         series: [{ type: "graph", layout: "none", data, links, edgeSymbol: ["none", "arrow"], edgeSymbolSize: 5, roam: false, animation: false,
           emphasis: { disabled: true }, left: 14, right: W - (colW * (nc - 1) + 14), top: Math.min(...data.map(x => x.y)), bottom: h - Math.max(...data.map(x => x.y)) }]
@@ -1461,7 +1461,7 @@
       $("lnPanelBody").innerHTML = `<table><tbody>
           <tr><td style="width:120px;color:#86909c">类型</td><td>${LN_KIND[n.kind] || "—"}</td></tr>
           <tr><td style="color:#86909c">所在阶段</td><td>${LN_LAYER[n.layer] || "—"}</td></tr>
-          <tr><td style="color:#86909c">原始名称</td><td>${isPage ? "—" : escHtml(n.label.replace(/血缘/g, "关系"))}</td></tr>
+          <tr><td style="color:#86909c">原始名称</td><td>${isPage ? "—" : escHtml(n.label.replace(/\u8840\u7f18/g, "关系"))}</td></tr>
           <tr><td style="color:#86909c">上下游</td><td>来源 ${ups.size} 项，去向 ${downs.size} 项</td></tr></tbody></table>`
         + tbl(isPage ? "这个页面读的数据" : "直接来源", up) + (isPage ? "" : tbl("直接去向", down));
       $("lnPanel").style.display = "";

@@ -1,4 +1,4 @@
-"""数据血缘：lineage.json 与代码同步；API 读的每张 MySQL 表都有上游；/api/lineage 契约。"""
+"""数据关系：lineage.json 与代码同步；API 读的每张 MySQL 表都有上游；/api/lineage 契约。"""
 import json
 import subprocess
 import sys

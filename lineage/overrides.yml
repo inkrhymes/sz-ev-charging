@@ -1,4 +1,4 @@
-# 血缘的手工补充。build_lineage.py 自动读代码里的 SQL（MySQL / Hive 读写）和 API 路由，
+# 数据关系的手工补充。build_lineage.py 自动读代码里的 SQL（MySQL / Hive 读写）和 API 路由，
 # 但数据湖路径是用 Path 拼出来的、原始文件在仓库外，这些读不出来，写在这里。
 # 节点 id：raw:<名> 原始文件，lake:<层>/<表> 数据湖 Parquet，hive:<库>.<表>，mysql:<表>，
 #          stream:<名> 实时消息，api:<路径>。

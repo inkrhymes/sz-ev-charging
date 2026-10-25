@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""表级数据血缘：静态读代码生成 lineage/lineage.json，不运行任何作业。
+"""表级数据关系：静态读代码生成 lineage/lineage.json，不运行任何作业。
 
 自动推断：
   - MySQL 表清单：sql/**/*.sql 里的 CREATE TABLE。
@@ -223,7 +223,7 @@ def build() -> dict:
             add(src, api, f"{method} {path}", kind="read", auto=False)
     add("file:lineage/lineage.json", "api:/api/lineage", "GET /api/lineage", kind="read", auto=False)
 
-    labels = ov.get("labels", {}) | {"file:lineage/lineage.json": "血缘文件（本脚本生成）", "stream:airflow_task_events": "调度任务开始/结束事件"}
+    labels = ov.get("labels", {}) | {"file:lineage/lineage.json": "数据关系文件（本脚本生成）", "stream:airflow_task_events": "调度任务开始/结束事件"}
     ids = sorted({e["source"] for e in edges.values()} | {e["target"] for e in edges.values()})
     bad = [i for i in ids if i.split(":", 1)[0] not in ("raw", "lake", "hive", "mysql", "stream", "file", "api")]
     if bad:

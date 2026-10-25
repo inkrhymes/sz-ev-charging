@@ -16,7 +16,7 @@ pw = pytest.importorskip("playwright.sync_api")
 UI_BASE = os.environ.get("UI_BASE", "http://127.0.0.1:5096/index.html")
 API_BASE = os.environ.get("API_BASE", "http://127.0.0.1:5000")
 PAGES = ["overview", "zone", "baseline", "map", "site", "realtime", "lineage", "alerts", "quality", "tickets"]
-BANNED = re.compile(r"口径|基线|窗口|血缘|stub|（无）|undefined|NaN|\[object Object\]")
+BANNED = re.compile(r"口径|基线|窗口|\u8840\u7f18|stub|（无）|undefined|NaN|\[object Object\]")
 
 pytestmark = pytest.mark.skipif(not os.environ.get("UI_TESTS"), reason="设 UI_TESTS=1 才跑页面测试（要先起页面和接口）")
 
@@ -295,7 +295,7 @@ def test_lineage_page_fixture(browser):
     assert pg.inner_text("#lnToggle") == "只看简要" and not pg.is_visible("#lnPanel")
     pg.click("#lnToggle"); pg.wait_for_timeout(300)
     assert "数据关系" in pg.inner_text(".sider") and "数据关系" in pg.inner_text("#pageTitle")
-    assert not any("血缘" in str(v) for v in labels.values())
+    assert not any("\u8840\u7f18" in str(v) for v in labels.values())
     assert not probs["js"], probs["js"]
     assert not BANNED.findall(pg.evaluate("document.body.innerText"))
     for m, txt in (("err", "数据关系暂时取不到"), ("empty", "还没有数据关系")):

@@ -154,7 +154,7 @@
    "kind": "file",
    "name": "lineage/lineage.json",
    "layer": "file",
-   "label": "血缘文件（本脚本生成）"
+   "label": "数据关系文件（本脚本生成）"
   },
   {
    "id": "hive:ads.baseline_naive",

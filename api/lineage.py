@@ -1,4 +1,4 @@
-"""/api/lineage：表级数据血缘（读 lineage/lineage.json，由 lineage/build_lineage.py 静态生成，不连库不跑 Spark）。"""
+"""/api/lineage：表级数据关系（读 lineage/lineage.json，由 lineage/build_lineage.py 静态生成，不连库不跑 Spark）。"""
 import json
 import os
 from collections import deque
