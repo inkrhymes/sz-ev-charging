@@ -16,9 +16,9 @@ DWD = DEMO / "dwd"
 CFG = dict(
     host=os.getenv("MYSQL_HOST", "127.0.0.1"),
     port=int(os.getenv("MYSQL_PORT", "3306")),
-    user=os.getenv("MYSQL_USER", "root"),
-    password=os.getenv("MYSQL_PASSWORD", "sz_ev"),
-    database=os.getenv("MYSQL_DB", "sz_ev"),
+    user=os.getenv("MYSQL_USER", "ev"),
+    password=os.getenv("MYSQL_PASSWORD", "evpass"),
+    database=os.getenv("MYSQL_DB", os.getenv("MYSQL_DATABASE", "sz_ev")),
     charset="utf8mb4",
     local_infile=True,
 )
