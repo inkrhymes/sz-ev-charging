@@ -210,7 +210,7 @@
     <div class="group">数据治理</div>
     <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li>
       <li data-route="runs"><svg class="ic"><use href="#i-trend"/></svg><span>调度运行</span></li>
-      <li data-route="lineage"><svg class="ic"><use href="#i-trend"/></svg><span>数据血缘</span></li></ul>
+      <li data-route="lineage"><svg class="ic"><use href="#i-trend"/></svg><span>数据关系</span></li></ul>
     <div class="group">运维管理</div>
     <ul class="nav"><li data-route="alerts"><svg class="ic"><use href="#i-shield"/></svg><span>异常告警</span></li>
       <li data-route="tickets"><svg class="ic"><use href="#i-tool"/></svg><span>运维工单</span></li></ul>
@@ -293,7 +293,7 @@
       </div>
       <div class="grid">
         <div class="card col-24"><div class="card-head"><div><div class="card-title">数据从哪来、被谁用</div><div style="color:#86909c;font-size:13px;margin-top:4px">原始文件先导入、清洗、汇总，再存进业务库，最后由各个页面读出来展示。从左往右就是数据流动的方向，点任意一项会标亮它的来源和去向。</div></div><div class="card-extra" id="lnExtra"></div></div>
-          <div class="card-body"><div id="lnState" class="empty" style="display:none"></div><div id="chartLineage" style="height:640px"></div></div></div>
+          <div class="card-body"><div id="lnState" class="empty" style="display:none"></div><div id="lnScroll" style="overflow-x:auto"><div id="chartLineage" style="height:640px"></div></div></div></div>
         <div class="card col-24" id="lnPanel" style="display:none"><div class="card-head"><div class="card-title" id="lnPanelTitle">节点详情</div></div>
           <div class="card-body" id="lnPanelBody"></div></div>
       </div>
@@ -458,7 +458,7 @@
       overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
       zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
       baseline: ["运行监控", "和上小时比", "实际占用和上一小时参考值差多少"],
-      lineage: ["数据治理", "数据血缘", "每张表的数据从哪来、又被哪些表和接口用到"],
+      lineage: ["数据治理", "数据关系", "每张表的数据从哪来、又被哪些表和接口用到"],
       realtime: ["运行监控", "实时占用", "每 15 分钟更新一次各片区的占用情况，页面每 5 秒自动刷新"],
       site: ["运行监控", "选址补桩", "哪些片区桩不够用、建议加几根，哪些先观察"],
       map: ["运行监控", "片区地图", "在地图上看哪片最忙，点一下看片区里的站"],
@@ -1316,11 +1316,11 @@
     }
     let rtRows = [];
     function rtStart() { if (rtTimer) return; loadRealtime(); rtTimer = setInterval(() => { if (!document.hidden) loadRealtime(); }, RT_EVERY); }
-    /* ---------- 数据血缘 ---------- */
+    /* ---------- 数据关系 ---------- */
     const LN_NAME = {
       "raw:pile_information": "充电桩功率表", "raw:station_information": "站点信息表", "raw:taz_shapefile_poi": "片区边界和周边设施",
       "raw:urbanev_station_raw": "站点充电原始记录", "raw:weather_csv": "气象站逐小时天气",
-      "stream:airflow_task_events": "调度任务开始结束", "stream:kafka_charge_5min": "实时充电消息", "file:lineage/lineage.json": "血缘记录文件",
+      "stream:airflow_task_events": "调度任务开始结束", "stream:kafka_charge_5min": "实时充电消息", "file:lineage/lineage.json": "关系记录文件",
       "lake:ods/charge_5min": "充电记录", "lake:ods/pile_power": "充电桩功率", "lake:ods/poi": "周边设施", "lake:ods/station_info": "站点信息", "lake:ods/weather": "天气记录",
       "lake:dwd/charge_5min_clean": "清洗后充电记录", "lake:dwd/quality_station": "站点数据质量", "lake:dwd/weather_hourly": "每小时天气",
       "lake:dwd/zone_price_hour": "片区每小时电价", "lake:dwd/zone_weather_hour": "片区每小时天气",
@@ -1335,7 +1335,7 @@
       "mysql:ads_zone_daily": "片区每日汇总", "mysql:ads_zone_occupancy_hour": "片区每小时占用率", "mysql:ads_zone_site_suggest": "选址补桩建议",
       "mysql:dim_station": "站点名录", "mysql:dq_alert": "异常告警", "mysql:dq_run_log": "数据检查记录", "mysql:ops_task_run": "调度运行记录", "mysql:rt_zone_occupancy": "片区实时占用",
       "api:/api/alerts": "告警列表接口", "api:/api/alerts/<int:alert_id>": "告警处理接口", "api:/api/baseline": "上小时对比接口", "api:/api/data_range": "数据时间范围接口",
-      "api:/api/forecast/metrics": "预测误差接口", "api:/api/lineage": "数据血缘接口", "api:/api/map/hourly": "地图逐小时接口", "api:/api/map/zones": "地图片区接口",
+      "api:/api/forecast/metrics": "预测误差接口", "api:/api/lineage": "数据关系接口", "api:/api/map/hourly": "地图逐小时接口", "api:/api/map/zones": "地图片区接口",
       "api:/api/ops/health_metrics": "运行健康接口", "api:/api/ops/runs": "运行记录接口", "api:/api/ops/runs/<ds>": "单日运行接口", "api:/api/overview": "总览接口",
       "api:/api/quality": "数据质量接口", "api:/api/realtime/zones": "实时占用接口", "api:/api/runs": "调度运行接口", "api:/api/runs/<ds>": "单日调度接口",
       "api:/api/site/suggest": "选址建议接口", "api:/api/tickets": "工单列表接口", "api:/api/tickets/<int:ticket_id>": "工单处理接口",
@@ -1358,7 +1358,7 @@
     let lnAll = null, lnSel = null, lnHi = null, lnFull = false;
     const lnNode = id => lnView().nodes.find(x => x.id === id) || (lnAll && lnAll.nodes.find(x => x.id === id));
     const lnName = id => id.startsWith("page:") ? ROUTES[id.slice(5)][1] : (LN_NAME[id] || ((lnAll && lnAll.nodes.find(x => x.id === id)) || {}).label || id);
-    const lnRaw = id => { const n = lnAll && lnAll.nodes.find(x => x.id === id); return n ? n.label : id; };
+    const lnRaw = id => { const n = lnAll && lnAll.nodes.find(x => x.id === id); return (n ? n.label : id).replace(/血缘/g, "关系"); };
     function lnView() {
       const pages = [...new Set(Object.values(LN_PAGE_OF))].filter(p => ROUTES[p]).map(p => ({ id: "page:" + p, kind: "page", layer: "page", label: ROUTES[p][1] }));
       const pageOf = id => { const p = id.startsWith("api:") && LN_PAGE_OF[id.slice(4)]; return p ? "page:" + p : null; };
@@ -1386,8 +1386,8 @@
       if (lnAll) return lnDraw();
       lnState("加载中…");
       let d;
-      try { d = await apiGet("/api/lineage"); } catch (e) { lnState("血缘数据暂时取不到，请稍后再试。", true); $("lnExtra").textContent = ""; return; }
-      if (!d || !(d.nodes || []).length) { lnState("还没有血缘数据。"); $("lnExtra").textContent = ""; return; }
+      try { d = await apiGet("/api/lineage"); } catch (e) { lnState("数据关系暂时取不到，请稍后再试。", true); $("lnExtra").textContent = ""; return; }
+      if (!d || !(d.nodes || []).length) { lnState("还没有数据关系。"); $("lnExtra").textContent = ""; return; }
       lnAll = { nodes: d.nodes, edges: d.edges || [] };
       lnState(""); lnDraw();
     }
@@ -1400,10 +1400,11 @@
       const order = ["raw", "ods", "dwd", "ads", "dq", "ops", "rt", "stream", "file", "api", "page"];
       const pord = Object.keys(ROUTES);
       cols.forEach(c => c.sort((a, b) => (order.indexOf(a.layer) - order.indexOf(b.layer)) || (pord.indexOf(a.id.slice(5)) - pord.indexOf(b.id.slice(5))) || lnName(a.id).localeCompare(lnName(b.id), "zh")));
-      const rows = Math.max(...cols.map(c => c.length)), rowH = 26, top = 46;
+      const rows = Math.max(...cols.map(c => c.length)), rowH = 36, top = 56;
       const h = top + rows * rowH + 20;
       $("chartLineage").style.height = h + "px"; charts.chartLineage.resize();
-      const W = $("chartLineage").clientWidth || 1000, colW = W / nc;
+      const box = $("lnScroll").clientWidth || 1000, W = Math.max(box, nc * 160), colW = W / nc;
+      $("chartLineage").style.width = W + "px"; charts.chartLineage.resize();
       const maxW = colW - 30, cw = ch => /[\u2e80-\uffff]/.test(ch) ? 12.5 : 7;
       const fit = t => { let w = 0, i = 0; for (; i < t.length; i++) { w += cw(t[i]); if (w > maxW) break; } return i >= t.length ? t : t.slice(0, Math.max(1, i - 1)) + "…"; };
       const data = [];
@@ -1412,17 +1413,17 @@
         const on = !lnHi || lnHi.has(n.id), me = n.id === lnSel;
         data.push({ id: n.id, name: n.id, x: colW * ci + 14, y, symbolSize: me ? 14 : 9,
           itemStyle: { color: LN_COLOR[ci === nc - 1 ? 6 : ci], opacity: on ? 1 : 0.15, borderColor: me ? "#1d2129" : "#fff", borderWidth: me ? 2 : 1 },
-          label: { show: true, position: "right", formatter: fit(lnName(n.id)), fontSize: 12, color: on ? "#1d2129" : "#c9cdd4", fontWeight: me ? "bold" : "normal" }, _n: n });
+          label: { show: true, position: "right", formatter: fit(lnName(n.id)), fontSize: 12, backgroundColor: "rgba(255,255,255,0.92)", padding: [2, 4], borderRadius: 3, distance: 6, color: on ? "#1d2129" : "#c9cdd4", fontWeight: me ? "bold" : "normal" }, _n: n });
       }));
       let hiEdges = 0;
       const links = v.edges.map(e => {
         const on = !lnHi || (lnHi.has(e.source) && lnHi.has(e.target)); if (lnHi && on) hiEdges++;
-        return { source: e.source, target: e.target, lineStyle: { color: on && lnHi ? "#165dff" : "#a9aeb8", opacity: on ? (lnHi ? 0.85 : 0.35) : 0.05, width: on && lnHi ? 1.6 : 1, curveness: 0.15 } };
+        return { source: e.source, target: e.target, lineStyle: { color: on && lnHi ? "#165dff" : "#a9aeb8", opacity: on ? (lnHi ? 0.85 : 0.35) : 0.05, width: on && lnHi ? 1.6 : 1, curveness: 0.3 } };
       });
       const graphic = v.cols.map((t, i) => ({ type: "text", left: colW * i + 10, top: 10, style: { text: t, fill: LN_COLOR[i === nc - 1 ? 6 : i], font: "bold 13px sans-serif" } }));
       charts.chartLineage.setOption({
         tooltip: { formatter: p => { if (p.dataType !== "node") return `${escHtml(lnName(p.data.source))} → ${escHtml(lnName(p.data.target))}`; const n = p.data._n;
-          return `<b>${escHtml(lnName(n.id))}</b><br/>${LN_KIND[n.kind] || ""} · ${LN_LAYER[n.layer] || ""}` + (n.kind === "page" ? "" : `<br/><span style="color:#86909c">${escHtml(n.label)}</span>`); } },
+          return `<b>${escHtml(lnName(n.id))}</b><br/>${LN_KIND[n.kind] || ""} · ${LN_LAYER[n.layer] || ""}` + (n.kind === "page" ? "" : `<br/><span style="color:#86909c">${escHtml(n.label.replace(/血缘/g, "关系"))}</span>`); } },
         graphic,
         series: [{ type: "graph", layout: "none", data, links, edgeSymbol: ["none", "arrow"], edgeSymbolSize: 5, roam: false, animation: false,
           emphasis: { disabled: true }, left: 14, right: W - (colW * (nc - 1) + 14), top: Math.min(...data.map(x => x.y)), bottom: h - Math.max(...data.map(x => x.y)) }]
@@ -1460,7 +1461,7 @@
       $("lnPanelBody").innerHTML = `<table><tbody>
           <tr><td style="width:120px;color:#86909c">类型</td><td>${LN_KIND[n.kind] || "—"}</td></tr>
           <tr><td style="color:#86909c">所在阶段</td><td>${LN_LAYER[n.layer] || "—"}</td></tr>
-          <tr><td style="color:#86909c">原始名称</td><td>${isPage ? "—" : escHtml(n.label)}</td></tr>
+          <tr><td style="color:#86909c">原始名称</td><td>${isPage ? "—" : escHtml(n.label.replace(/血缘/g, "关系"))}</td></tr>
           <tr><td style="color:#86909c">上下游</td><td>来源 ${ups.size} 项，去向 ${downs.size} 项</td></tr></tbody></table>`
         + tbl(isPage ? "这个页面读的数据" : "直接来源", up) + (isPage ? "" : tbl("直接去向", down));
       $("lnPanel").style.display = "";
