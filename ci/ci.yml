@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest (file mode)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q tests
+      - name: forecast smoke run
+        run: python -m forecast.train --out /tmp
+
+  compose-smoke:
+    name: docker compose smoke (start.sh)
+    runs-on: ubuntu-latest
+    needs: test
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: start stack
+        run: |
+          [ -f .env ] || cp .env.example .env
+          bash scripts/start.sh
+      - name: probe endpoints
+        run: |
+          B=http://localhost:5000
+          for i in $(seq 1 30); do curl -fs $B/api/health && break; sleep 2; done
+          curl -fs $B/api/health | grep -q '"ok":true'
+          curl -fs "$B/api/overview?dt=2022-09-01" | grep -q '"station_cnt":25'
+          test "$(curl -fs $B/api/zones | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["data"]))')" = 18
+          test "$(curl -fs "$B/api/zone/series?taz_id=1106" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["data"]["points"]))')" = 168
+          curl -fs $B/ | grep -q '<title>'
+      - name: logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+      - name: stop
+        if: always()
+        run: bash scripts/stop.sh --purge || true
