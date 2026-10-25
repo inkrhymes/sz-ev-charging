@@ -34,7 +34,7 @@ def test_order_keys_schema(lake):
     assert n == 18 and len(p.sent) == 18
     order = [(v["ts"], v["station_id"]) for _, _, v in p.sent]
     assert order == sorted(order)
-    assert p.sent[0][2]["ts"] == "2022-09-01T00:00:00+08:00" and p.sent[-1][2]["ts"].startswith("2022-09-02T00:10")
+    assert p.sent[0][2]["ts"] == "2022-09-01 00:00:00" and p.sent[-1][2]["ts"].startswith("2022-09-02 00:10")
     assert all(t == "charge_5min" and k == str(v["station_id"]).encode() for t, k, v in p.sent)
     assert all(list(v) == KEYS for _, _, v in p.sent)
     assert sum(v["occupancy"] is None for _, _, v in p.sent) == 2  # NaN -> null
@@ -44,7 +44,7 @@ def test_order_keys_schema(lake):
 def test_filters(lake):
     p = FakeProducer()
     assert kr.replay(lake, p, start="2022-09-02", end="2022-09-02", stations={1002}) == 3
-    assert {v["station_id"] for _, _, v in p.sent} == {1002}
+    assert {v["station_id"] for _, _, v in p.sent} == {"1002"}
 
 
 def test_speed_sleeps_by_sim_time(lake):
@@ -60,6 +60,6 @@ def test_dry_run_cli(lake, monkeypatch, capsys, tmp_path):
     out = tmp_path / "o.jsonl"
     assert kr.main(["--start", "2022-09-01", "--end", "2022-09-01", "--dry-run", str(out)]) == 9
     lines = [json.loads(x) for x in out.read_text().splitlines()]
-    assert len(lines) == 9 and lines[0]["station_id"] == 1001
+    assert len(lines) == 9 and lines[0]["station_id"] == "1001"
     kr.main(["--end", "2022-09-01", "--stations", "1003", "--dry-run"])
     assert len(capsys.readouterr().out.splitlines()) == 3

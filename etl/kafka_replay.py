@@ -2,7 +2,7 @@
 """Replay dwd/charge_5min_clean into Kafka topic `charge_5min` (key = station_id).
 
 Reads one dt partition at a time (pyarrow), sorts by (ts, station_id) and sends one JSON message
-per row:  {station_id, taz_id, ts (Beijing time ISO, +08:00), busy, idle, total_piles, occupancy, quality_flag}
+per row:  {station_id, taz_id, ts (Beijing time "YYYY-MM-DD HH:MM:SS"); station_id/taz_id as strings, busy, idle, total_piles, occupancy, quality_flag}
 
   python etl/kafka_replay.py --start 2022-09-01 --end 2022-09-01 --dry-run out.jsonl
   python etl/kafka_replay.py --start 2022-09-01 --end 2022-09-07 --speed 288 --stations 1001,1002
@@ -45,16 +45,23 @@ def read_day(lake: Path, dt: str, stations: set[int] | None = None) -> pa.Table:
     return t.take(pc.sort_indices(t, sort_keys=[("ts", "ascending"), ("station_id", "ascending")]))
 
 
+def _int(x):
+    x = _num(x)
+    return None if x is None else int(x)
+
+
 def iter_messages(t: pa.Table):
     """Yield (key_bytes, dict, ts) in table order; ts is naive Beijing time."""
     for b in t.to_batches(BATCH):
         cols = {c: b.column(c).to_pylist() for c in FIELDS}
         for i in range(b.num_rows):
             ts = cols["ts"][i]
-            v = {"station_id": int(cols["station_id"][i]), "taz_id": _num(cols["taz_id"][i]),
-                 "ts": ts.strftime("%Y-%m-%dT%H:%M:%S") + "+08:00",
-                 "busy": _num(cols["busy"][i]), "idle": _num(cols["idle"][i]),
-                 "total_piles": _num(cols["total_piles"][i]), "occupancy": _num(cols["occupancy"][i]),
+            taz = _num(cols["taz_id"][i])
+            v = {"station_id": str(int(cols["station_id"][i])),
+                 "taz_id": None if taz is None else str(int(taz)),
+                 "ts": ts.strftime("%Y-%m-%d %H:%M:%S"),
+                 "busy": _int(cols["busy"][i]), "idle": _int(cols["idle"][i]),
+                 "total_piles": _int(cols["total_piles"][i]), "occupancy": _num(cols["occupancy"][i]),
                  "quality_flag": cols["quality_flag"][i]}
             yield str(v["station_id"]).encode(), v, ts
 
