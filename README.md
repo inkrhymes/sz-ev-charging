@@ -92,6 +92,7 @@ python3 scripts/smoke_live.py                          # 线上冒烟检查（8 
 | `docs/warehouse_design.md` | Hive / MySQL 表设计 |
 | `docs/perf/spark_baseline.md` | Spark 耗时与索引性能 |
 | `docs/api_contract.md` | 接口约定 |
+| `docs/lineage.md` | 表级数据血缘（`/api/lineage`） |
 
 ---
 

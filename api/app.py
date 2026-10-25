@@ -1183,6 +1183,8 @@ def map_hourly():
 # 调度运行 / 监控接口（只读）：见 api/ops.py
 import ops as _ops  # noqa: E402
 _ops.register(app, lambda q, a=(): _sql(q, a), ok, err)  # lambda：测试可 monkeypatch app._sql
+import lineage as _lineage  # noqa: E402
+_lineage.register(app, ok, err)
 
 
 

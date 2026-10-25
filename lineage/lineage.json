@@ -1,0 +1,1596 @@
+{
+ "version": 1,
+ "generated_by": "lineage/build_lineage.py",
+ "nodes": [
+  {
+   "id": "api:/api/alerts",
+   "kind": "api",
+   "name": "/api/alerts",
+   "layer": "api",
+   "label": "/api/alerts"
+  },
+  {
+   "id": "api:/api/alerts/<int:alert_id>",
+   "kind": "api",
+   "name": "/api/alerts/<int:alert_id>",
+   "layer": "api",
+   "label": "/api/alerts/<int:alert_id>"
+  },
+  {
+   "id": "api:/api/baseline",
+   "kind": "api",
+   "name": "/api/baseline",
+   "layer": "api",
+   "label": "/api/baseline"
+  },
+  {
+   "id": "api:/api/data_range",
+   "kind": "api",
+   "name": "/api/data_range",
+   "layer": "api",
+   "label": "/api/data_range"
+  },
+  {
+   "id": "api:/api/forecast/metrics",
+   "kind": "api",
+   "name": "/api/forecast/metrics",
+   "layer": "api",
+   "label": "/api/forecast/metrics"
+  },
+  {
+   "id": "api:/api/lineage",
+   "kind": "api",
+   "name": "/api/lineage",
+   "layer": "api",
+   "label": "/api/lineage"
+  },
+  {
+   "id": "api:/api/map/hourly",
+   "kind": "api",
+   "name": "/api/map/hourly",
+   "layer": "api",
+   "label": "/api/map/hourly"
+  },
+  {
+   "id": "api:/api/map/zones",
+   "kind": "api",
+   "name": "/api/map/zones",
+   "layer": "api",
+   "label": "/api/map/zones"
+  },
+  {
+   "id": "api:/api/ops/health_metrics",
+   "kind": "api",
+   "name": "/api/ops/health_metrics",
+   "layer": "api",
+   "label": "/api/ops/health_metrics"
+  },
+  {
+   "id": "api:/api/ops/runs",
+   "kind": "api",
+   "name": "/api/ops/runs",
+   "layer": "api",
+   "label": "/api/ops/runs"
+  },
+  {
+   "id": "api:/api/ops/runs/<ds>",
+   "kind": "api",
+   "name": "/api/ops/runs/<ds>",
+   "layer": "api",
+   "label": "/api/ops/runs/<ds>"
+  },
+  {
+   "id": "api:/api/overview",
+   "kind": "api",
+   "name": "/api/overview",
+   "layer": "api",
+   "label": "/api/overview"
+  },
+  {
+   "id": "api:/api/quality",
+   "kind": "api",
+   "name": "/api/quality",
+   "layer": "api",
+   "label": "/api/quality"
+  },
+  {
+   "id": "api:/api/realtime/zones",
+   "kind": "api",
+   "name": "/api/realtime/zones",
+   "layer": "api",
+   "label": "/api/realtime/zones"
+  },
+  {
+   "id": "api:/api/runs",
+   "kind": "api",
+   "name": "/api/runs",
+   "layer": "api",
+   "label": "/api/runs"
+  },
+  {
+   "id": "api:/api/runs/<ds>",
+   "kind": "api",
+   "name": "/api/runs/<ds>",
+   "layer": "api",
+   "label": "/api/runs/<ds>"
+  },
+  {
+   "id": "api:/api/site/suggest",
+   "kind": "api",
+   "name": "/api/site/suggest",
+   "layer": "api",
+   "label": "/api/site/suggest"
+  },
+  {
+   "id": "api:/api/tickets",
+   "kind": "api",
+   "name": "/api/tickets",
+   "layer": "api",
+   "label": "/api/tickets"
+  },
+  {
+   "id": "api:/api/tickets/<int:ticket_id>",
+   "kind": "api",
+   "name": "/api/tickets/<int:ticket_id>",
+   "layer": "api",
+   "label": "/api/tickets/<int:ticket_id>"
+  },
+  {
+   "id": "api:/api/zone/series",
+   "kind": "api",
+   "name": "/api/zone/series",
+   "layer": "api",
+   "label": "/api/zone/series"
+  },
+  {
+   "id": "api:/api/zones",
+   "kind": "api",
+   "name": "/api/zones",
+   "layer": "api",
+   "label": "/api/zones"
+  },
+  {
+   "id": "file:lineage/lineage.json",
+   "kind": "file",
+   "name": "lineage/lineage.json",
+   "layer": "file",
+   "label": "血缘文件（本脚本生成）"
+  },
+  {
+   "id": "hive:ads.baseline_naive",
+   "kind": "hive",
+   "name": "ads.baseline_naive",
+   "layer": "ads",
+   "label": "ads.baseline_naive"
+  },
+  {
+   "id": "hive:ads.city_overview",
+   "kind": "hive",
+   "name": "ads.city_overview",
+   "layer": "ads",
+   "label": "ads.city_overview"
+  },
+  {
+   "id": "hive:ads.quality_summary",
+   "kind": "hive",
+   "name": "ads.quality_summary",
+   "layer": "ads",
+   "label": "ads.quality_summary"
+  },
+  {
+   "id": "hive:ads.station_busy_day",
+   "kind": "hive",
+   "name": "ads.station_busy_day",
+   "layer": "ads",
+   "label": "ads.station_busy_day"
+  },
+  {
+   "id": "hive:ads.zone_daily",
+   "kind": "hive",
+   "name": "ads.zone_daily",
+   "layer": "ads",
+   "label": "ads.zone_daily"
+  },
+  {
+   "id": "hive:ads.zone_occupancy_hour",
+   "kind": "hive",
+   "name": "ads.zone_occupancy_hour",
+   "layer": "ads",
+   "label": "ads.zone_occupancy_hour"
+  },
+  {
+   "id": "hive:dwd.ext_charge_5min_clean",
+   "kind": "hive",
+   "name": "dwd.ext_charge_5min_clean",
+   "layer": "dwd",
+   "label": "dwd.ext_charge_5min_clean"
+  },
+  {
+   "id": "hive:dwd.quality_station_day",
+   "kind": "hive",
+   "name": "dwd.quality_station_day",
+   "layer": "dwd",
+   "label": "dwd.quality_station_day"
+  },
+  {
+   "id": "hive:dwd.station_5min_clean",
+   "kind": "hive",
+   "name": "dwd.station_5min_clean",
+   "layer": "dwd",
+   "label": "dwd.station_5min_clean"
+  },
+  {
+   "id": "hive:dwd.zone_hour",
+   "kind": "hive",
+   "name": "dwd.zone_hour",
+   "layer": "dwd",
+   "label": "dwd.zone_hour"
+  },
+  {
+   "id": "hive:ods.charge_5min",
+   "kind": "hive",
+   "name": "ods.charge_5min",
+   "layer": "ods",
+   "label": "ods.charge_5min"
+  },
+  {
+   "id": "hive:ods.station_info",
+   "kind": "hive",
+   "name": "ods.station_info",
+   "layer": "ods",
+   "label": "ods.station_info"
+  },
+  {
+   "id": "lake:ads/forecast_metric_daily",
+   "kind": "lake",
+   "name": "ads/forecast_metric_daily",
+   "layer": "ads",
+   "label": "ads/forecast_metric_daily"
+  },
+  {
+   "id": "lake:ads/forecast_zone_hour",
+   "kind": "lake",
+   "name": "ads/forecast_zone_hour",
+   "layer": "ads",
+   "label": "ads/forecast_zone_hour"
+  },
+  {
+   "id": "lake:ads/zone_condition_effect",
+   "kind": "lake",
+   "name": "ads/zone_condition_effect",
+   "layer": "ads",
+   "label": "ads/zone_condition_effect"
+  },
+  {
+   "id": "lake:ads/zone_daily",
+   "kind": "lake",
+   "name": "ads/zone_daily",
+   "layer": "ads",
+   "label": "ads/zone_daily"
+  },
+  {
+   "id": "lake:ads/zone_function_label",
+   "kind": "lake",
+   "name": "ads/zone_function_label",
+   "layer": "ads",
+   "label": "ads/zone_function_label"
+  },
+  {
+   "id": "lake:ads/zone_hour",
+   "kind": "lake",
+   "name": "ads/zone_hour",
+   "layer": "ads",
+   "label": "ads/zone_hour"
+  },
+  {
+   "id": "lake:ads/zone_site_suggest",
+   "kind": "lake",
+   "name": "ads/zone_site_suggest",
+   "layer": "ads",
+   "label": "ads/zone_site_suggest"
+  },
+  {
+   "id": "lake:dwd/charge_5min_clean",
+   "kind": "lake",
+   "name": "dwd/charge_5min_clean",
+   "layer": "dwd",
+   "label": "dwd/charge_5min_clean"
+  },
+  {
+   "id": "lake:dwd/quality_station",
+   "kind": "lake",
+   "name": "dwd/quality_station",
+   "layer": "dwd",
+   "label": "dwd/quality_station"
+  },
+  {
+   "id": "lake:dwd/weather_hourly",
+   "kind": "lake",
+   "name": "dwd/weather_hourly",
+   "layer": "dwd",
+   "label": "dwd/weather_hourly"
+  },
+  {
+   "id": "lake:dwd/zone_price_hour",
+   "kind": "lake",
+   "name": "dwd/zone_price_hour",
+   "layer": "dwd",
+   "label": "dwd/zone_price_hour"
+  },
+  {
+   "id": "lake:dwd/zone_weather_hour",
+   "kind": "lake",
+   "name": "dwd/zone_weather_hour",
+   "layer": "dwd",
+   "label": "dwd/zone_weather_hour"
+  },
+  {
+   "id": "lake:ods/charge_5min",
+   "kind": "lake",
+   "name": "ods/charge_5min",
+   "layer": "ods",
+   "label": "ods/charge_5min"
+  },
+  {
+   "id": "lake:ods/pile_power",
+   "kind": "lake",
+   "name": "ods/pile_power",
+   "layer": "ods",
+   "label": "ods/pile_power"
+  },
+  {
+   "id": "lake:ods/poi",
+   "kind": "lake",
+   "name": "ods/poi",
+   "layer": "ods",
+   "label": "ods/poi"
+  },
+  {
+   "id": "lake:ods/station_info",
+   "kind": "lake",
+   "name": "ods/station_info",
+   "layer": "ods",
+   "label": "ods/station_info"
+  },
+  {
+   "id": "lake:ods/weather",
+   "kind": "lake",
+   "name": "ods/weather",
+   "layer": "ods",
+   "label": "ods/weather"
+  },
+  {
+   "id": "mysql:ads_baseline_naive",
+   "kind": "mysql",
+   "name": "ads_baseline_naive",
+   "layer": "ads",
+   "label": "ads_baseline_naive"
+  },
+  {
+   "id": "mysql:ads_city_overview",
+   "kind": "mysql",
+   "name": "ads_city_overview",
+   "layer": "ads",
+   "label": "ads_city_overview"
+  },
+  {
+   "id": "mysql:ads_forecast_metric_daily",
+   "kind": "mysql",
+   "name": "ads_forecast_metric_daily",
+   "layer": "ads",
+   "label": "ads_forecast_metric_daily"
+  },
+  {
+   "id": "mysql:ads_forecast_zone_hour",
+   "kind": "mysql",
+   "name": "ads_forecast_zone_hour",
+   "layer": "ads",
+   "label": "ads_forecast_zone_hour"
+  },
+  {
+   "id": "mysql:ads_quality_summary",
+   "kind": "mysql",
+   "name": "ads_quality_summary",
+   "layer": "ads",
+   "label": "ads_quality_summary"
+  },
+  {
+   "id": "mysql:ads_ticket",
+   "kind": "mysql",
+   "name": "ads_ticket",
+   "layer": "ads",
+   "label": "ads_ticket"
+  },
+  {
+   "id": "mysql:ads_zone_daily",
+   "kind": "mysql",
+   "name": "ads_zone_daily",
+   "layer": "ads",
+   "label": "ads_zone_daily"
+  },
+  {
+   "id": "mysql:ads_zone_occupancy_hour",
+   "kind": "mysql",
+   "name": "ads_zone_occupancy_hour",
+   "layer": "ads",
+   "label": "ads_zone_occupancy_hour"
+  },
+  {
+   "id": "mysql:ads_zone_site_suggest",
+   "kind": "mysql",
+   "name": "ads_zone_site_suggest",
+   "layer": "ads",
+   "label": "ads_zone_site_suggest"
+  },
+  {
+   "id": "mysql:dim_station",
+   "kind": "mysql",
+   "name": "dim_station",
+   "layer": "ads",
+   "label": "dim_station"
+  },
+  {
+   "id": "mysql:dq_alert",
+   "kind": "mysql",
+   "name": "dq_alert",
+   "layer": "dq",
+   "label": "dq_alert"
+  },
+  {
+   "id": "mysql:dq_run_log",
+   "kind": "mysql",
+   "name": "dq_run_log",
+   "layer": "dq",
+   "label": "dq_run_log"
+  },
+  {
+   "id": "mysql:ops_task_run",
+   "kind": "mysql",
+   "name": "ops_task_run",
+   "layer": "ops",
+   "label": "ops_task_run"
+  },
+  {
+   "id": "mysql:rt_zone_occupancy",
+   "kind": "mysql",
+   "name": "rt_zone_occupancy",
+   "layer": "rt",
+   "label": "rt_zone_occupancy"
+  },
+  {
+   "id": "raw:pile_information",
+   "kind": "raw",
+   "name": "pile_information",
+   "layer": "raw",
+   "label": "UrbanEV 充电桩额定功率 CSV（pile_rated_power.csv）"
+  },
+  {
+   "id": "raw:station_information",
+   "kind": "raw",
+   "name": "station_information",
+   "layer": "raw",
+   "label": "UrbanEV 站点信息 CSV"
+  },
+  {
+   "id": "raw:taz_shapefile_poi",
+   "kind": "raw",
+   "name": "taz_shapefile_poi",
+   "layer": "raw",
+   "label": "深圳交通小区边界 + POI"
+  },
+  {
+   "id": "raw:urbanev_station_raw",
+   "kind": "raw",
+   "name": "urbanev_station_raw",
+   "layer": "raw",
+   "label": "UrbanEV 站点 5 分钟原始 CSV"
+  },
+  {
+   "id": "raw:weather_csv",
+   "kind": "raw",
+   "name": "weather_csv",
+   "layer": "raw",
+   "label": "机场/市区气象站逐小时 CSV"
+  },
+  {
+   "id": "stream:airflow_task_events",
+   "kind": "stream",
+   "name": "airflow_task_events",
+   "layer": "stream",
+   "label": "调度任务开始/结束事件"
+  },
+  {
+   "id": "stream:kafka_charge_5min",
+   "kind": "stream",
+   "name": "kafka_charge_5min",
+   "layer": "stream",
+   "label": "Kafka topic charge_5min"
+  }
+ ],
+ "edges": [
+  {
+   "source": "api:/api/alerts/<int:alert_id>",
+   "target": "mysql:dq_alert",
+   "kind": "write",
+   "script": "PATCH /api/alerts/<int:alert_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "api:/api/tickets",
+   "target": "mysql:ads_ticket",
+   "kind": "write",
+   "script": "POST /api/tickets",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "api:/api/tickets",
+   "target": "mysql:dq_alert",
+   "kind": "write",
+   "script": "POST /api/tickets",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "api:/api/tickets/<int:ticket_id>",
+   "target": "mysql:ads_ticket",
+   "kind": "write",
+   "script": "PATCH /api/tickets/<int:ticket_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "file:lineage/lineage.json",
+   "target": "api:/api/lineage",
+   "kind": "read",
+   "script": "GET /api/lineage",
+   "tasks": [],
+   "auto": false
+  },
+  {
+   "source": "hive:ads.baseline_naive",
+   "target": "mysql:ads_baseline_naive",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ads.baseline_naive",
+   "target": "mysql:ads_baseline_naive",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ads.city_overview",
+   "target": "mysql:ads_city_overview",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ads.city_overview",
+   "target": "mysql:ads_city_overview",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ads.quality_summary",
+   "target": "mysql:ads_quality_summary",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ads.quality_summary",
+   "target": "mysql:ads_quality_summary",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ads.station_busy_day",
+   "target": "hive:ads.quality_summary",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ads.zone_daily",
+   "target": "lake:ads/zone_daily",
+   "kind": "write",
+   "script": "spark/jobs/ads_build.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ads.zone_daily",
+   "target": "mysql:ads_zone_daily",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ads.zone_daily",
+   "target": "mysql:ads_zone_daily",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ads.zone_occupancy_hour",
+   "target": "hive:ads.baseline_naive",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ads.zone_occupancy_hour",
+   "target": "mysql:ads_zone_occupancy_hour",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ads.zone_occupancy_hour",
+   "target": "mysql:ads_zone_occupancy_hour",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:dwd.ext_charge_5min_clean",
+   "target": "hive:ads.station_busy_day",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:dwd.ext_charge_5min_clean",
+   "target": "hive:dwd.quality_station_day",
+   "kind": "write",
+   "script": "spark/jobs/ads_build.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:dwd.ext_charge_5min_clean",
+   "target": "hive:dwd.zone_hour",
+   "kind": "write",
+   "script": "spark/jobs/ads_build.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:dwd.quality_station_day",
+   "target": "hive:ads.city_overview",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:dwd.quality_station_day",
+   "target": "hive:ads.quality_summary",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:dwd.quality_station_day",
+   "target": "hive:ads.zone_daily",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:dwd.station_5min_clean",
+   "target": "hive:dwd.quality_station_day",
+   "kind": "write",
+   "script": "spark/jobs/dwd_clean.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:dwd.station_5min_clean",
+   "target": "hive:dwd.zone_hour",
+   "kind": "write",
+   "script": "spark/jobs/dwd_clean.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:dwd.zone_hour",
+   "target": "hive:ads.city_overview",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:dwd.zone_hour",
+   "target": "hive:ads.zone_daily",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:dwd.zone_hour",
+   "target": "hive:ads.zone_occupancy_hour",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:dwd.zone_hour",
+   "target": "lake:ads/zone_hour",
+   "kind": "write",
+   "script": "spark/jobs/ads_build.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ods.charge_5min",
+   "target": "hive:dwd.station_5min_clean",
+   "kind": "write",
+   "script": "spark/jobs/dwd_clean.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ods.station_info",
+   "target": "hive:ads.zone_daily",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ods.station_info",
+   "target": "hive:ads.zone_occupancy_hour",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ods.station_info",
+   "target": "hive:dwd.quality_station_day",
+   "kind": "write",
+   "script": "spark/jobs/dwd_clean.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ods.station_info",
+   "target": "hive:dwd.station_5min_clean",
+   "kind": "write",
+   "script": "spark/jobs/dwd_clean.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "hive:ods.station_info",
+   "target": "hive:dwd.zone_hour",
+   "kind": "write",
+   "script": "spark/jobs/dwd_clean.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": true
+  },
+  {
+   "source": "hive:ods.station_info",
+   "target": "mysql:dim_station",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": true
+  },
+  {
+   "source": "lake:ads/forecast_metric_daily",
+   "target": "mysql:dq_alert",
+   "kind": "write",
+   "script": "forecast/evaluate.py",
+   "tasks": [
+    "forecast_evaluate"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/forecast_zone_hour",
+   "target": "lake:ads/forecast_metric_daily",
+   "kind": "write",
+   "script": "forecast/evaluate.py",
+   "tasks": [
+    "forecast_evaluate"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/forecast_zone_hour",
+   "target": "mysql:ads_forecast_metric_daily",
+   "kind": "write",
+   "script": "forecast/evaluate.py",
+   "tasks": [
+    "forecast_evaluate"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_function_label",
+   "target": "lake:ads/zone_site_suggest",
+   "kind": "write",
+   "script": "etl/zone_profile.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_hour",
+   "target": "api:/api/map/zones",
+   "kind": "read",
+   "script": "GET /api/map/zones",
+   "tasks": [],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_hour",
+   "target": "lake:ads/forecast_metric_daily",
+   "kind": "write",
+   "script": "forecast/evaluate.py",
+   "tasks": [
+    "forecast_evaluate"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_hour",
+   "target": "lake:ads/forecast_zone_hour",
+   "kind": "write",
+   "script": "forecast/daily.py",
+   "tasks": [
+    "forecast_daily"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_hour",
+   "target": "mysql:ads_forecast_metric_daily",
+   "kind": "write",
+   "script": "forecast/evaluate.py",
+   "tasks": [
+    "forecast_evaluate"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_hour",
+   "target": "mysql:ads_forecast_zone_hour",
+   "kind": "write",
+   "script": "forecast/daily.py",
+   "tasks": [
+    "forecast_daily"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_hour",
+   "target": "mysql:dq_alert",
+   "kind": "write",
+   "script": "quality/engine.py",
+   "tasks": [
+    "dq_ods",
+    "dq_dwd",
+    "dq_ads"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_hour",
+   "target": "mysql:dq_run_log",
+   "kind": "write",
+   "script": "quality/engine.py",
+   "tasks": [
+    "dq_ods",
+    "dq_dwd",
+    "dq_ads"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ads/zone_site_suggest",
+   "target": "mysql:ads_zone_site_suggest",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/charge_5min_clean",
+   "target": "hive:dwd.ext_charge_5min_clean",
+   "kind": "write",
+   "script": "spark/jobs/ads_build.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/charge_5min_clean",
+   "target": "lake:dwd/zone_price_hour",
+   "kind": "write",
+   "script": "etl/weather_price.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/charge_5min_clean",
+   "target": "mysql:dq_alert",
+   "kind": "write",
+   "script": "quality/engine.py",
+   "tasks": [
+    "dq_ods",
+    "dq_dwd",
+    "dq_ads"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/charge_5min_clean",
+   "target": "mysql:dq_run_log",
+   "kind": "write",
+   "script": "quality/engine.py",
+   "tasks": [
+    "dq_ods",
+    "dq_dwd",
+    "dq_ads"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/quality_station",
+   "target": "hive:ads.quality_summary",
+   "kind": "write",
+   "script": "spark/jobs/ads_metrics.py",
+   "tasks": [
+    "ads_build",
+    "publish"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/quality_station",
+   "target": "mysql:ads_quality_summary",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/weather_hourly",
+   "target": "lake:dwd/zone_weather_hour",
+   "kind": "write",
+   "script": "etl/weather_price.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/zone_price_hour",
+   "target": "lake:ads/zone_condition_effect",
+   "kind": "write",
+   "script": "etl/weather_price.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/zone_price_hour",
+   "target": "lake:ads/zone_site_suggest",
+   "kind": "write",
+   "script": "etl/zone_profile.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:dwd/zone_weather_hour",
+   "target": "lake:ads/zone_condition_effect",
+   "kind": "write",
+   "script": "etl/weather_price.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/charge_5min",
+   "target": "lake:dwd/charge_5min_clean",
+   "kind": "write",
+   "script": "etl/full_pipeline.py",
+   "tasks": [
+    "ods_ingest",
+    "dwd_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/charge_5min",
+   "target": "lake:dwd/quality_station",
+   "kind": "write",
+   "script": "etl/full_pipeline.py",
+   "tasks": [
+    "ods_ingest",
+    "dwd_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/charge_5min",
+   "target": "mysql:dq_alert",
+   "kind": "write",
+   "script": "quality/engine.py",
+   "tasks": [
+    "dq_ods",
+    "dq_dwd",
+    "dq_ads"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/charge_5min",
+   "target": "mysql:dq_run_log",
+   "kind": "write",
+   "script": "quality/engine.py",
+   "tasks": [
+    "dq_ods",
+    "dq_dwd",
+    "dq_ads"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/pile_power",
+   "target": "lake:ods/station_info",
+   "kind": "write",
+   "script": "etl/pile_power.py",
+   "tasks": [
+    "ods_ingest"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/poi",
+   "target": "lake:ads/zone_function_label",
+   "kind": "write",
+   "script": "etl/zone_profile.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/station_info",
+   "target": "api:/api/map/zones",
+   "kind": "read",
+   "script": "GET /api/map/zones",
+   "tasks": [],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/station_info",
+   "target": "hive:ods.station_info",
+   "kind": "write",
+   "script": "spark/jobs/ads_build.py",
+   "tasks": [
+    "ads_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/station_info",
+   "target": "lake:ads/zone_function_label",
+   "kind": "write",
+   "script": "etl/zone_profile.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/station_info",
+   "target": "lake:ads/zone_site_suggest",
+   "kind": "write",
+   "script": "etl/zone_profile.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/station_info",
+   "target": "lake:dwd/zone_weather_hour",
+   "kind": "write",
+   "script": "etl/weather_price.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/station_info",
+   "target": "mysql:ads_zone_occupancy_hour",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/station_info",
+   "target": "mysql:dim_station",
+   "kind": "write",
+   "script": "spark/jobs/export_ads_parquet.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "lake:ods/weather",
+   "target": "lake:dwd/weather_hourly",
+   "kind": "write",
+   "script": "etl/weather_price.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "mysql:ads_baseline_naive",
+   "target": "api:/api/baseline",
+   "kind": "read",
+   "script": "GET /api/baseline",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_city_overview",
+   "target": "api:/api/data_range",
+   "kind": "read",
+   "script": "GET /api/data_range",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_city_overview",
+   "target": "api:/api/overview",
+   "kind": "read",
+   "script": "GET /api/overview",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_forecast_metric_daily",
+   "target": "api:/api/forecast/metrics",
+   "kind": "read",
+   "script": "GET /api/forecast/metrics",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_forecast_zone_hour",
+   "target": "api:/api/baseline",
+   "kind": "read",
+   "script": "GET /api/baseline",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_forecast_zone_hour",
+   "target": "api:/api/ops/health_metrics",
+   "kind": "read",
+   "script": "GET /api/ops/health_metrics",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_quality_summary",
+   "target": "api:/api/quality",
+   "kind": "read",
+   "script": "GET /api/quality",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_ticket",
+   "target": "api:/api/tickets",
+   "kind": "read",
+   "script": "GET /api/tickets",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_ticket",
+   "target": "api:/api/tickets",
+   "kind": "read",
+   "script": "POST /api/tickets",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_ticket",
+   "target": "api:/api/tickets/<int:ticket_id>",
+   "kind": "read",
+   "script": "PATCH /api/tickets/<int:ticket_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_ticket",
+   "target": "mysql:dq_alert",
+   "kind": "write",
+   "script": "orchestration/rebuild_dq_alerts.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_zone_daily",
+   "target": "api:/api/map/zones",
+   "kind": "read",
+   "script": "GET /api/map/zones",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_zone_occupancy_hour",
+   "target": "api:/api/map/hourly",
+   "kind": "read",
+   "script": "GET /api/map/hourly",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_zone_occupancy_hour",
+   "target": "api:/api/ops/health_metrics",
+   "kind": "read",
+   "script": "GET /api/ops/health_metrics",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_zone_occupancy_hour",
+   "target": "api:/api/zone/series",
+   "kind": "read",
+   "script": "GET /api/zone/series",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_zone_occupancy_hour",
+   "target": "api:/api/zones",
+   "kind": "read",
+   "script": "GET /api/zones",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_zone_site_suggest",
+   "target": "api:/api/site/suggest",
+   "kind": "read",
+   "script": "GET /api/site/suggest",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dim_station",
+   "target": "api:/api/map/zones",
+   "kind": "read",
+   "script": "GET /api/map/zones",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dq_alert",
+   "target": "api:/api/alerts",
+   "kind": "read",
+   "script": "GET /api/alerts",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dq_alert",
+   "target": "api:/api/alerts/<int:alert_id>",
+   "kind": "read",
+   "script": "PATCH /api/alerts/<int:alert_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dq_alert",
+   "target": "api:/api/ops/health_metrics",
+   "kind": "read",
+   "script": "GET /api/ops/health_metrics",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dq_alert",
+   "target": "api:/api/tickets",
+   "kind": "read",
+   "script": "POST /api/tickets",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dq_alert",
+   "target": "mysql:ads_ticket",
+   "kind": "write",
+   "script": "orchestration/rebuild_dq_alerts.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": true
+  },
+  {
+   "source": "mysql:dq_run_log",
+   "target": "api:/api/ops/health_metrics",
+   "kind": "read",
+   "script": "GET /api/ops/health_metrics",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dq_run_log",
+   "target": "mysql:ops_task_run",
+   "kind": "write",
+   "script": "orchestration/backfill_run_log.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": true
+  },
+  {
+   "source": "mysql:ops_task_run",
+   "target": "api:/api/ops/health_metrics",
+   "kind": "read",
+   "script": "GET /api/ops/health_metrics",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ops_task_run",
+   "target": "api:/api/ops/runs",
+   "kind": "read",
+   "script": "GET /api/ops/runs",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ops_task_run",
+   "target": "api:/api/ops/runs/<ds>",
+   "kind": "read",
+   "script": "GET /api/ops/runs/<ds>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ops_task_run",
+   "target": "api:/api/runs",
+   "kind": "read",
+   "script": "GET /api/runs",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ops_task_run",
+   "target": "api:/api/runs/<ds>",
+   "kind": "read",
+   "script": "GET /api/runs/<ds>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:rt_zone_occupancy",
+   "target": "api:/api/realtime/zones",
+   "kind": "read",
+   "script": "GET /api/realtime/zones",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "raw:pile_information",
+   "target": "lake:ods/pile_power",
+   "kind": "write",
+   "script": "etl/pile_power.py",
+   "tasks": [
+    "ods_ingest"
+   ],
+   "auto": false
+  },
+  {
+   "source": "raw:station_information",
+   "target": "lake:ods/station_info",
+   "kind": "write",
+   "script": "etl/full_pipeline.py",
+   "tasks": [
+    "ods_ingest",
+    "dwd_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "raw:taz_shapefile_poi",
+   "target": "lake:ods/poi",
+   "kind": "write",
+   "script": "etl/zone_profile.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "raw:urbanev_station_raw",
+   "target": "lake:ods/charge_5min",
+   "kind": "write",
+   "script": "etl/full_pipeline.py",
+   "tasks": [
+    "ods_ingest",
+    "dwd_build"
+   ],
+   "auto": false
+  },
+  {
+   "source": "raw:weather_csv",
+   "target": "lake:ods/weather",
+   "kind": "write",
+   "script": "etl/weather_price.py",
+   "tasks": [
+    "manual"
+   ],
+   "auto": false
+  },
+  {
+   "source": "stream:airflow_task_events",
+   "target": "mysql:ops_task_run",
+   "kind": "write",
+   "script": "orchestration/run_log.py",
+   "tasks": [
+    "all_tasks"
+   ],
+   "auto": false
+  },
+  {
+   "source": "stream:kafka_charge_5min",
+   "target": "mysql:rt_zone_occupancy",
+   "kind": "write",
+   "script": "stream/zone_occupancy_stream.py",
+   "tasks": [
+    "streaming"
+   ],
+   "auto": false
+  }
+ ],
+ "unused_mysql_tables": [
+  "dwd_quality_station",
+  "dwd_station_5min_clean",
+  "dwd_zone_hour",
+  "ods_calendar_day",
+  "ods_station_info",
+  "ods_station_raw_5min",
+  "ods_weather_zone_h"
+ ],
+ "scripts_without_task": []
+}

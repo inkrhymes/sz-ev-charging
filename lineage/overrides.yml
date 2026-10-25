@@ -1,0 +1,110 @@
+# 血缘的手工补充。build_lineage.py 自动读代码里的 SQL（MySQL / Hive 读写）和 API 路由，
+# 但数据湖路径是用 Path 拼出来的、原始文件在仓库外，这些读不出来，写在这里。
+# 节点 id：raw:<名> 原始文件，lake:<层>/<表> 数据湖 Parquet，hive:<库>.<表>，mysql:<表>，
+#          stream:<名> 实时消息，api:<路径>。
+
+# 每个脚本属于哪个调度任务（Airflow DAG sz_ev_daily / orchestration/tasks.py）。不在 DAG 里的写 manual。
+tasks:
+  etl/full_pipeline.py: [ods_ingest, dwd_build]
+  etl/pile_power.py: [ods_ingest]          # full_pipeline 每次写完 station_info 会自动跑
+  spark/jobs/ads_build.py: [ads_build]
+  spark/jobs/dwd_clean.py: [ads_build]     # 被 ads_build 导入
+  spark/jobs/ods_load.py: [ads_build]
+  spark/jobs/ads_metrics.py: [ads_build, publish]
+  spark/jobs/export_ads_mysql.py: [publish]
+  quality/engine.py: [dq_ods, dq_dwd, dq_ads]
+  forecast/daily.py: [forecast_daily]
+  forecast/evaluate.py: [forecast_evaluate]
+  orchestration/run_log.py: [all_tasks]    # 每个任务开始/结束都记一条
+  spark/jobs/export_ads_parquet.py: [manual]
+  etl/weather_price.py: [manual]
+  etl/zone_profile.py: [manual]
+  stream/zone_occupancy_stream.py: [streaming]
+  orchestration/rebuild_dq_alerts.py: [manual]
+  orchestration/backfill_run_log.py: [manual]
+
+# 不扫描的脚本（只做演示 CSV、没有真实读写，或写的是临时表）
+skip_scan: [etl/load_ods.py, etl/clean_to_dwd.py, etl/generate_demo_subset.py, forecast/train.py, forecast/db.py,
+            etl/load_mysql_from_demo.py]   # 演示数据装载，只在空库第一次启动时跑
+
+# 只用手工边、不用自动推断的脚本（自动推断会把对应关系连错）
+manual_only: [spark/jobs/export_ads_parquet.py]
+
+labels:
+  raw:urbanev_station_raw: UrbanEV 站点 5 分钟原始 CSV
+  raw:station_information: UrbanEV 站点信息 CSV
+  raw:pile_information: UrbanEV 充电桩额定功率 CSV（pile_rated_power.csv）
+  raw:weather_csv: 机场/市区气象站逐小时 CSV
+  raw:taz_shapefile_poi: 深圳交通小区边界 + POI
+  stream:kafka_charge_5min: Kafka topic charge_5min
+  api:lineage: 本接口
+
+# 自动推断连错、要去掉的边：[上游, 下游, 脚本]
+drop_edges:
+  - [mysql:dq_alert, mysql:dq_run_log, quality/engine.py]   # engine 读 dq_alert 只是为了去重，不是 dq_run_log 的来源
+
+# 手工边：[上游, 下游, 脚本]
+edges:
+  - [raw:urbanev_station_raw, lake:ods/charge_5min, etl/full_pipeline.py]
+  - [raw:station_information, lake:ods/station_info, etl/full_pipeline.py]
+  - [lake:ods/charge_5min, lake:dwd/charge_5min_clean, etl/full_pipeline.py]
+  - [lake:ods/charge_5min, lake:dwd/quality_station, etl/full_pipeline.py]
+  - [raw:pile_information, lake:ods/pile_power, etl/pile_power.py]
+  - [lake:ods/pile_power, lake:ods/station_info, etl/pile_power.py]
+  - [lake:dwd/charge_5min_clean, hive:dwd.ext_charge_5min_clean, spark/jobs/ads_build.py]
+  - [hive:dwd.ext_charge_5min_clean, hive:dwd.zone_hour, spark/jobs/ads_build.py]
+  - [hive:dwd.ext_charge_5min_clean, hive:dwd.quality_station_day, spark/jobs/ads_build.py]
+  - [lake:ods/station_info, hive:ods.station_info, spark/jobs/ads_build.py]
+  # Spark 里经临时视图（v_ext / v_base / {src}）中转、自动推断连不上的
+  - [hive:ods.charge_5min, hive:dwd.station_5min_clean, spark/jobs/dwd_clean.py]
+  - [hive:ods.station_info, hive:dwd.station_5min_clean, spark/jobs/dwd_clean.py]
+  - [hive:dwd.station_5min_clean, hive:dwd.zone_hour, spark/jobs/dwd_clean.py]
+  - [hive:dwd.station_5min_clean, hive:dwd.quality_station_day, spark/jobs/dwd_clean.py]
+  - [hive:ods.station_info, hive:ads.zone_occupancy_hour, spark/jobs/ads_metrics.py]   # ZONE_POWER_SQL 子查询算负荷
+  - [hive:dwd.ext_charge_5min_clean, hive:ads.station_busy_day, spark/jobs/ads_metrics.py]
+  - [lake:dwd/quality_station, hive:ads.quality_summary, spark/jobs/ads_metrics.py]
+  - [hive:dwd.zone_hour, lake:ads/zone_hour, spark/jobs/ads_build.py]
+  - [hive:ads.zone_daily, lake:ads/zone_daily, spark/jobs/ads_build.py]
+  - [lake:ods/charge_5min, mysql:dq_run_log, quality/engine.py]
+  - [lake:dwd/charge_5min_clean, mysql:dq_run_log, quality/engine.py]
+  - [lake:ads/zone_hour, mysql:dq_run_log, quality/engine.py]
+  - [lake:ods/charge_5min, mysql:dq_alert, quality/engine.py]
+  - [lake:dwd/charge_5min_clean, mysql:dq_alert, quality/engine.py]
+  - [lake:ads/zone_hour, mysql:dq_alert, quality/engine.py]
+  - [lake:ads/zone_hour, lake:ads/forecast_zone_hour, forecast/daily.py]
+  - [lake:ads/zone_hour, mysql:ads_forecast_zone_hour, forecast/daily.py]
+  - [lake:ads/forecast_zone_hour, lake:ads/forecast_metric_daily, forecast/evaluate.py]
+  - [lake:ads/zone_hour, lake:ads/forecast_metric_daily, forecast/evaluate.py]
+  - [lake:ads/forecast_zone_hour, mysql:ads_forecast_metric_daily, forecast/evaluate.py]
+  - [lake:ads/zone_hour, mysql:ads_forecast_metric_daily, forecast/evaluate.py]
+  - [lake:ads/forecast_metric_daily, mysql:dq_alert, forecast/evaluate.py]
+  - [stream:kafka_charge_5min, mysql:rt_zone_occupancy, stream/zone_occupancy_stream.py]
+  - [stream:airflow_task_events, mysql:ops_task_run, orchestration/run_log.py]
+  - [mysql:dq_run_log, mysql:ops_task_run, orchestration/backfill_run_log.py]
+  - [raw:weather_csv, lake:ods/weather, etl/weather_price.py]
+  - [lake:ods/weather, lake:dwd/weather_hourly, etl/weather_price.py]
+  - [lake:dwd/weather_hourly, lake:dwd/zone_weather_hour, etl/weather_price.py]
+  - [lake:ods/station_info, lake:dwd/zone_weather_hour, etl/weather_price.py]
+  - [lake:dwd/charge_5min_clean, lake:dwd/zone_price_hour, etl/weather_price.py]
+  - [lake:dwd/zone_weather_hour, lake:ads/zone_condition_effect, etl/weather_price.py]
+  - [lake:dwd/zone_price_hour, lake:ads/zone_condition_effect, etl/weather_price.py]
+  - [raw:taz_shapefile_poi, lake:ods/poi, etl/zone_profile.py]
+  - [lake:ods/poi, lake:ads/zone_function_label, etl/zone_profile.py]
+  - [lake:ods/station_info, lake:ads/zone_function_label, etl/zone_profile.py]
+  - [lake:ads/zone_function_label, lake:ads/zone_site_suggest, etl/zone_profile.py]
+  - [lake:dwd/zone_price_hour, lake:ads/zone_site_suggest, etl/zone_profile.py]
+  - [lake:ods/station_info, lake:ads/zone_site_suggest, etl/zone_profile.py]
+  # 不起 Spark 的回写路径：直接读 Hive 仓库目录里的 Parquet
+  - [hive:ads.zone_occupancy_hour, mysql:ads_zone_occupancy_hour, spark/jobs/export_ads_parquet.py]
+  - [hive:ads.baseline_naive, mysql:ads_baseline_naive, spark/jobs/export_ads_parquet.py]
+  - [hive:ads.city_overview, mysql:ads_city_overview, spark/jobs/export_ads_parquet.py]
+  - [hive:ads.zone_daily, mysql:ads_zone_daily, spark/jobs/export_ads_parquet.py]
+  - [hive:ads.quality_summary, mysql:ads_quality_summary, spark/jobs/export_ads_parquet.py]
+  - [lake:ods/station_info, mysql:dim_station, spark/jobs/export_ads_parquet.py]
+  - [lake:ods/station_info, mysql:ads_zone_occupancy_hour, spark/jobs/export_ads_parquet.py]
+  - [lake:ads/zone_site_suggest, mysql:ads_zone_site_suggest, spark/jobs/export_ads_parquet.py]
+  - [lake:dwd/quality_station, mysql:ads_quality_summary, spark/jobs/export_ads_parquet.py]
+
+# API 读文件/数据湖的部分（MySQL 部分自动从代码里读）
+api_inputs:
+  /api/map/zones: [lake:ods/station_info, lake:ads/zone_hour]
