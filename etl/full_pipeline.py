@@ -5,7 +5,7 @@ Layout (hive-style, partition column `dt` NOT stored inside files):
   data/lake/ods/charge_5min/dt=YYYY-MM-DD/part-0.parquet
   data/lake/dwd/charge_5min_clean/dt=YYYY-MM-DD/part-0.parquet
   data/lake/dwd/quality_station/run=<start>_<end>/part-0.parquet
-  data/lake/_staging/<start>_<end>/<station>.parquet   (intermediate, per station)
+  data/lake/_staging/<start>_<end>_<pid>/<station>.parquet   (intermediate, per station)
 
 Steps
   1 stage : read each station CSV (parallel, --workers), filter [start,end],
@@ -96,6 +96,7 @@ def main():
     ap.add_argument("--stations", default="all", help="'all' or comma list or N (first N)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--batch-days", type=int, default=7)
+    ap.add_argument("--layer", choices=["ods", "dwd", "all"], default="all", help="which partitions to (re)write")
     ap.add_argument("--keep-staging", action="store_true")
     ap.add_argument("--ds", help="single day YYYY-MM-DD (overrides --start/--end)")
     a = ap.parse_args()
@@ -109,7 +110,7 @@ def main():
     info = pd.read_csv(SRC / "station_information.csv")
     piles = dict(zip(info.station_id.astype(int), info.charge_count.astype(int)))
     taz = dict(zip(info.station_id.astype(int), info.TAZID.astype(int)))
-    stg = LAKE / "_staging" / tag
+    stg = LAKE / "_staging" / f"{tag}_{os.getpid()}"  # per-process: concurrent runs on the shared box must not clobber each other
     shutil.rmtree(stg, ignore_errors=True); stg.mkdir(parents=True)
     m = {}
     src_bytes = sum(f.stat().st_size for f in files)
@@ -137,7 +138,7 @@ def main():
         for dt, g in df.groupby("dt"):
             g = g.sort_values(["station_id", "ts"])
             g = g.assign(ts=g.ts.astype("datetime64[us]"))
-            for root, sch in ((ods_root, ODS_SCHEMA), (dwd_root, DWD_SCHEMA)):
+            for root, sch in [x for x in ((ods_root, ODS_SCHEMA), (dwd_root, DWD_SCHEMA)) if a.layer == "all" or x[0].parent.name == a.layer]:
                 pdir = root / f"dt={dt}"; tmp = root / f".tmp_dt={dt}"
                 shutil.rmtree(tmp, ignore_errors=True); tmp.mkdir(parents=True)
                 tbl = pa.Table.from_pandas(g[sch.names], schema=sch, preserve_index=False)
@@ -147,6 +148,8 @@ def main():
         del df, tables
         print("split window", d.date(), "->", w_end.date(), flush=True)
         d = w_end
+    if ods_rows != rows:
+        raise SystemExit(f"row mismatch: staged {rows} vs written {ods_rows}")
     m["split"] = dict(ods_rows=ods_rows, dwd_rows=dwd_rows, partitions=parts, secs=time.time()-t,
                       ods_bytes=dir_size(ods_root), dwd_bytes=dir_size(dwd_root))
     print("split", m["split"], flush=True)
