@@ -1,6 +1,6 @@
-# 数据血缘（表级）
+# 数据关系（表级）
 
-这份文档说明每张表的数据从哪来、被谁用。血缘是**读代码得出的**，不连库、不跑 Spark/Airflow。
+这份文档说明每张表的数据从哪来、被谁用。数据关系是**读代码得出的**，不连库、不跑 Spark/Airflow。
 
 - 生成脚本：`lineage/build_lineage.py`（扫 `etl/`、`spark/jobs/`、`forecast/`、`stream/`、`quality/`、`orchestration/` 里的 SQL 和 `api/` 的路由）
 - 手工补充：`lineage/overrides.yml`（脚本到 Airflow 任务的对应、经临时视图中转认不出来的边、文件读写等）
@@ -63,12 +63,12 @@ flowchart LR
 
 ## 前端页面
 
-页面 `#/lineage`（菜单「数据治理」）把血缘画成六列：原始文件、数据湖、Hive、消息流与文件、业务库、接口。
+页面 `#/lineage`（菜单「数据治理」）把数据关系画成六列：原始文件、数据湖、Hive、消息流与文件、业务库、接口。
 
 - 点一个节点，会标亮它的上游和下游，并显示产出它的脚本和调度任务。
 - 可以按表名搜索。
 
-![数据血缘页](screenshots/lineage.png)
+![数据关系页](screenshots/lineage.png)
 
 ## 已知局限
 
