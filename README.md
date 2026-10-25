@@ -1,122 +1,111 @@
-# 基于大数据技术的深圳市电动汽车充电站运行管理可视化系统
+# 基于大数据技术的深圳市电动汽车充电站运行管理可视化系统设计与实现
 
-面向城市公共充电站运维与管理场景的演示系统。系统以公开数据集 [UrbanEV](https://www.nature.com/articles/s41597-025-04874-4)（深圳市公共充电站运行记录，CC0）为数据基础，完成多源数据导入、清洗与质量评估、分层存储、指标计算与可视化查询，并为运维工单与只读权限预留可演示接口。
+本仓库为上述课题的**演示实现**，面向简历展示与开题薄皮验收。系统完成 UrbanEV 深圳充电站子集的数据接入、质量清洗、MySQL 分层建模、指标汇总，以及基于 Flask 与 ECharts 的运行管理可视化大屏。
 
-**仓库地址：** https://github.com/inkrhymes/sz-ev-charging
+## 一、系统目标
 
-## 1. 项目背景
+1. 对充电站 5 分钟粒度运行数据进行清洗与质量评估，识别卡死站与高缺失站。
+2. 按 ODS → DWD → ADS 分层落库，形成可复现的指标表。
+3. 通过薄层 API 与单页大屏展示站点概况、质量分布、片区时序及朴素基线对比。
+4. 保留开题所述的极简工单、只读登录与上一时刻基线三类薄皮能力（stub）。
 
-随着公共充电设施规模扩大，运营方更关注原始数据是否可靠、脏数据如何处理、片区忙闲如何呈现，以及异常设备如何进入检修流程。本项目在本科毕业设计开题范围内，将「数据采集 → 清洗与质量评估 → 运行分析 → 可视化查询 → 运营调度辅助 → 系统管理」六类能力收敛为一套可本地一键启动的演示链路，便于答辩展示与技术面试说明。
+## 二、技术路线
 
-## 2. 功能概览
+| 层次 | 技术 |
+|------|------|
+| 数据源 | UrbanEV 开源数据集（CC0），演示子集 25 站、14 日窗 |
+| 处理 | Python ETL（造数/清洗/质检） |
+| 存储 | MySQL 8.0（ods / dwd / ads） |
+| 服务 | Flask REST API |
+| 前端 | ECharts 单页大屏 |
+| 编排 | Docker Compose + `scripts/start.sh` |
 
-| 模块 | 能力说明 |
-|------|----------|
-| 数据导入与清洗 | 按固定 25 站演示子集抽取 UrbanEV 5 分钟原始记录，完成缺失标记、卡死识别、聚合与质量报告输出 |
-| 分层存储 | MySQL 按 ODS / DWD / ADS 分层建表，支持从演示 CSV 装载并回填概览、质检、工单等指标 |
-| 运行分析 | 片区小时占用率序列；以上一时刻值作为朴素基线，用于对照展示（不做深度学习训练） |
-| 可视化查询 | ECharts 单页大屏：KPI、占用时序、质检面板、基线对比、工单列表 |
-| 运营调度辅助 | 由卡死 / 高缺失规则生成待检修、巡检类工单，支持状态流转演示 |
-| 系统管理 | 只读演示登录入口（轻量 stub，非完整权限体系） |
+说明：Flask、MySQL、ECharts 仅作为技术实现手段，不写入课题题名。
 
-## 3. 技术栈
+## 三、演示范围与边界
 
-- 语言与脚本：Python 3
-- 存储：MySQL 8.0（ODS / DWD / ADS）
-- 后端：Flask（REST API）
-- 前端：原生 HTML + ECharts
-- 部署：Docker Compose，一键脚本 `scripts/start.sh`
+**已实现主路径**
 
-## 4. 演示数据与实测指标
+- UrbanEV 25 站演示子集 → 清洗与质检 → MySQL 分层 → 核心指标 SQL → Flask API → ECharts 大屏
 
-- 站点规模：25 个公共充电站（含卡死与高缺失样本，便于展示质检与工单）
-- 时间窗口：2022-09-01～2022-09-14（14 天，约 100,800 行）
-- 交通小区（TAZ）：23 个
-- 整行缺失率：**26.42%**
-- 疑似卡死站：**4**
-- 缺失率超过 30% 的站点：**6**
-- 工单建议：repair 4 / inspect 6
+**薄皮 stub（可演示、非生产）**
 
-详细口径见 `docs/quality_report.md`、`docs/data_dictionary.md`。
+- 极简运维工单、只读演示登录、上一时刻 naive 基线曲线
 
-> 说明：UrbanEV 全量原始数据约数 GB，不纳入本仓库。仓库仅保留站点清单与 API / 大屏所需的小体积 DWD 产物；完整 5 分钟清洗表可按 `etl/` 脚本在本地再生。
+**明确不做**
 
-## 5. 快速开始
+- 对抗式真实爬虫、Hive/Spark、React/Vue 重前端、LSTM 等真实预测模型
 
-### 5.1 环境要求
+## 四、仓库结构
 
-- Docker 与 Docker Compose
-- Python 3.10+（装载脚本使用；首次运行会创建 `.venv`）
+| 路径 | 说明 |
+|------|------|
+| `sql/ods` `sql/dwd` `sql/ads` | 分层建表与核心指标 SQL |
+| `etl/` | 子集生成、清洗、MySQL 装载脚本 |
+| `api/` | Flask 薄 API |
+| `web/` | ECharts 可视化大屏 |
+| `stubs/` | 工单 / 登录 / 基线 stub |
+| `data/demo/` | 演示子集（原始全量不入库；大 CSV 见 `.gitignore`） |
+| `scripts/start.sh` `scripts/stop.sh` | 一键启动与停止 |
+| `docs/` | 字段字典、质检报告、API 约定、录屏脚本、简历项目描述等 |
+| `docker-compose.yml` | MySQL 与 API 服务编排 |
 
-### 5.2 启动
+## 五、环境要求
+
+- Docker / Docker Compose
+- Python 3.10+（本地装载与 ETL；建议使用仓库内 `.venv`）
+- 可选：复制 `.env.example` 为 `.env` 修改端口与数据库口令
+
+## 六、快速启动
 
 ```bash
 git clone https://github.com/inkrhymes/sz-ev-charging.git
 cd sz-ev-charging
-cp .env.example .env
-bash scripts/start.sh
+cp .env.example .env          # 可按需修改
+bash scripts/start.sh         # MySQL → 建表 → 装载 → API
 ```
 
-脚本将依次：启动 MySQL → 执行分层建表 SQL → 装载演示 CSV 并回填 ADS → 构建并启动 API。
+启动成功后：
 
-- API 默认地址：http://localhost:5000  
-- 健康检查：http://localhost:5000/api/health  
-- 大屏页面：用浏览器打开 `web/index.html`（优先请求本地 API；不可用时回落本地假数据）
+- API 健康检查：`http://localhost:5000/api/health`
+- 概览指标：`http://localhost:5000/api/overview`
+- 可视化大屏：浏览器打开 `web/index.html`（或经 API 静态挂载路径访问）
 
 停止服务：
 
 ```bash
-bash scripts/stop.sh          # 停止容器
-bash scripts/stop.sh --purge  # 停止并清除数据卷
+bash scripts/stop.sh          # 保留数据卷
+bash scripts/stop.sh --purge  # 同时删除数据卷
 ```
 
-### 5.3 仅文件模式（不启 MySQL）
+> 说明：`docker compose` 仅挂载 `sql/` 根目录初始化文件；分层建表与装载由 `scripts/start.sh` 顺序执行。API 文件模式需挂载仓库根目录（见 `docker-compose.yml` 中 `REPO_ROOT`）。
 
-若仅需联调大屏与质检数字，可在仓库根目录运行：
+## 七、演示数据摘要（实测）
 
-```bash
-cd api && pip install -r requirements.txt && python app.py
-```
-
-默认读取 `data/demo/dwd` 下实测 CSV（`MOCK=1` 可强制假数据）。
-
-## 6. 目录结构
-
-```
-sz-ev-charging/
-├── api/                 # Flask 接口
-├── web/                 # ECharts 可视化页面
-├── etl/                 # 子集抽取、清洗、MySQL 装载
-├── sql/
-│   ├── ods/             # 原始层建表
-│   ├── dwd/             # 明细层建表
-│   └── ads/             # 应用层建表与指标 SQL
-├── data/demo/           # 演示站清单与 DWD 小文件
-├── docs/                # 字段字典、质检报告、接口约定、录屏脚本等
-├── scripts/             # start.sh / stop.sh
-├── docker-compose.yml
-└── README.md
-```
-
-## 7. 文档索引
-
-| 文档 | 内容 |
+| 项目 | 数值 |
 |------|------|
-| `docs/data_dictionary.md` | 字段与分层表说明 |
-| `docs/quality_report.md` | 演示子集质检实测报告 |
-| `docs/api_contract.md` | REST 接口约定 |
-| `docs/demo_script.md` | 演示录屏口播脚本 |
-| `docs/resume_project.md` | 简历项目表述草稿 |
-| `docs/schedule_15d.md` | 演示版实施排期 |
+| 站点 / 片区 | 25 站 / 23 个 TAZ |
+| 时间窗 | 2022-09-01 ～ 2022-09-14（5 分钟粒度） |
+| 行数 | 100,800 |
+| 整行缺失率 | 26.42% |
+| 疑似卡死站 / 高缺失站 | 4 / 6 |
 
-## 8. 范围说明
+详细站级结果见 `docs/quality_report.md`。
 
-本仓库对应「可演示交付」范围：以 UrbanEV 演示子集跑通清洗、分层、接口与大屏，并对开题中的工单、只读登录、朴素基线保留可点击 stub。
+## 八、验收口径
 
-当前版本**不包含**：全量 5.4GB 现场重跑、分片区天气消融全套实验、ARIMA / XGBoost / LSTM 训练、Hive / Spark 集群、React / Vue 重前端，以及生产级权限与电网 EMS 接入。上述内容可按毕业设计进度表在后续阶段扩展。
+1. **能跑**：`scripts/start.sh` 可完成 MySQL 健康检查、ADS 回填与 API 响应。
+2. **能录**：按 `docs/demo_script.md` 完成 1～2 分钟大屏演示录屏。
+3. **能量化**：质检数字、分层表与大屏指标一致；三类 stub 可点击演示。
 
-## 9. 数据来源与许可
+## 九、相关文档
 
-UrbanEV 数据集许可为 CC0 公共领域。使用本仓库代码时请保留对原数据论文的引用：
+- `docs/data_dictionary.md` — 数据字典  
+- `docs/api_contract.md` — API 约定  
+- `docs/quality_report.md` — 质检报告  
+- `docs/resume_project.md` — 简历项目描述草稿  
+- `docs/schedule_15d.md` — 15 日推进计划  
 
-Li H, Qu H, Tan X, et al. UrbanEV: An open benchmark dataset for urban electric vehicle charging demand prediction. *Scientific Data*, 2025, 12: 523.
+## 十、许可说明
+
+UrbanEV 原始数据遵循其开源许可（CC0）。本仓库仅收录演示所需的小规模子集与衍生表；完整原始 CSV 不纳入版本库。
