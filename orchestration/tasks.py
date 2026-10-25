@@ -86,7 +86,7 @@ def ads_build(ds: str) -> None:
     # 演示：片区小时汇总（口径同 dwd_zone_hour）
     dwd = engine.read_frame(part_dir("dwd", ds))
     info = pd.read_csv(DEMO / "dwd" / "dwd_quality_station.csv")[["station_id", "taz_id"]]
-    d = dwd.merge(info, on="station_id", how="left")
+    d = dwd if "taz_id" in dwd.columns else dwd.merge(info, on="station_id", how="left")
     d["ts_hour"] = pd.to_datetime(d["ts"]).dt.floor("h").astype(str)
     g = d.groupby(["taz_id", "ts_hour"]).agg(
         busy_sum=("busy", "sum"), piles_sum=("total_piles", "sum"),
