@@ -3,10 +3,11 @@
 # 停止: docker compose -f orchestration/docker-compose.airflow.yml down
 services:
   airflow:
-    image: apache/airflow:2.9.3-python3.11
+    build: {context: ., dockerfile: Dockerfile.airflow}
+    image: sz-ev-airflow:2.9.3-spark3.5.3
     container_name: sz-ev-airflow
     network_mode: host          # 直接连宿主 3306 上的 MySQL
-    mem_limit: 1536m
+    mem_limit: 5g             # Spark driver 2g + Airflow；MySQL(~0.6G)+API 合计 <7G
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__PARALLELISM: "2"
@@ -17,12 +18,20 @@ services:
       AIRFLOW__CORE__DAGS_FOLDER: /repo/orchestration/dags
       REPO_ROOT: /repo
       MYSQL_HOST: 127.0.0.1
-      _PIP_ADDITIONAL_REQUIREMENTS: "pymysql"
+      SZ_EV_LAKE: /workspace/sz-ev-charging/data/lake
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      SZ_DRIVER_MEM: 2g
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DB: sz_ev
       _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: admin
       _AIRFLOW_WWW_USER_PASSWORD: admin
       _AIRFLOW_DB_MIGRATE: "true"
-    user: "50000:0"
+    user: "1000:0"              # 与宿主 box 用户一致，写湖文件属主不变
     volumes:
       - ../:/repo
+      - /workspace/sz-ev-charging/data/lake:/workspace/sz-ev-charging/data/lake   # 真实数据湖，读写
+      - /workspace/thesis_ev_data:/workspace/thesis_ev_data:ro                     # 原始 CSV
     command: standalone
