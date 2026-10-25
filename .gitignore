@@ -35,3 +35,4 @@ data/mysql/
 backups/
 perf/out/
 *.jar
+!docs/media/*.mp4
