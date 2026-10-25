@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 from quality import engine  # noqa: E402
 
 DEMO = ROOT / "data" / "demo"
-REAL_LAKE = ROOT / "data" / "lake"
+REAL_LAKE = Path(os.getenv("SZ_EV_LAKE", ROOT / "data" / "lake"))
 DEMO_LAKE = Path(os.getenv("DEMO_LAKE", ROOT / "orchestration" / "_work" / "lake"))
 
 FULL_PIPELINE = ROOT / "etl" / "full_pipeline.py"
