@@ -532,6 +532,34 @@ def tickets_patch(ticket_id):
     return err("ticket not found", 404)
 
 
+@app.post("/api/tickets")
+def tickets_create():
+    """从告警派工单：{station_id, type?, alert_id?}。带 alert_id 时同一条告警只派一次，并把告警改成处理中（ack）。
+    工单仍保存在进程内存（ads_ticket 表没有 alert_id 列）。"""
+    denied = _require_admin()
+    if denied:
+        return denied
+    body = request.get_json(silent=True) or {}
+    sid = str(body.get("station_id") or "").strip()
+    typ = body.get("type") or "repair"
+    if not sid:
+        return err("station_id 不能为空")
+    if typ not in {"repair", "inspect"}:
+        return err("type must be repair|inspect")
+    alert_id = body.get("alert_id")
+    store = tickets_store()
+    if alert_id is not None:
+        alert_id = int(alert_id)
+        dup = next((t for t in store if t.get("alert_id") == alert_id), None)
+        if dup:
+            return err(f"这条告警已经派过工单 WO-{dup['ticket_id']:04d}", 409)
+    t = {"ticket_id": max((x["ticket_id"] for x in store), default=0) + 1, "station_id": sid, "type": typ,
+         "status": "open", "alert_id": alert_id, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    store.append(t)
+    alert = alerts_write(alert_id, "ack", f"已派工单 WO-{t['ticket_id']:04d}") if alert_id is not None else None
+    return ok({"ticket": t, "alert": alert}), 201
+
+
 @app.post("/api/auth/login")
 def auth_login():
     body = request.get_json(silent=True) or {}

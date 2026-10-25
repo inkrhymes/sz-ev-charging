@@ -174,3 +174,16 @@ def test_lake_map_real_ads(monkeypatch):
     appmod._lake_map.cache_clear()
     assert len(stations) == 1682 and len(zones) == 331
     assert sum(z["avg_occupancy"] is not None for z in zones) > 300
+
+
+def test_ticket_from_alert(client):
+    a = next(x for x in client.get("/api/alerts").get_json()["data"] if x["station_id"] and x["status"] == "open")
+    body = {"station_id": a["station_id"], "alert_id": a["alert_id"]}
+    assert client.post("/api/tickets", json=body).status_code == 401
+    assert client.post("/api/tickets", json=body, headers=RO).status_code == 403
+    r = client.post("/api/tickets", json=body, headers=ADMIN)
+    assert r.status_code == 201
+    d = r.get_json()["data"]
+    assert d["ticket"]["alert_id"] == a["alert_id"] and d["alert"]["status"] == "ack"
+    assert client.post("/api/tickets", json=body, headers=ADMIN).status_code == 409
+    assert any(t.get("alert_id") == a["alert_id"] for t in client.get("/api/tickets").get_json()["data"])

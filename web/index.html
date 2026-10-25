@@ -293,7 +293,14 @@
       <div class="card">
         <div class="tabs" id="alertTabs"></div>
         <div class="card-body">
-          <table><thead><tr><th>编号</th><th>站</th><th>片区</th><th>问题</th><th>情况</th><th>紧急程度</th><th>发现时间</th><th>状态</th><th>操作</th></tr></thead><tbody id="alertBody"></tbody></table>
+          <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;color:var(--text-2);flex-wrap:wrap">
+            紧急程度<select id="alertLevel" style="width:110px"><option value="">全部</option><option value="high">紧急</option><option value="medium">一般</option><option value="low">提醒</option></select>
+            片区<select id="alertZone" style="width:130px"><option value="">全部片区</option></select>
+            <input id="alertQ" placeholder="搜索站点编号" style="width:160px" />
+            <span class="readonly-note" id="alertCount"></span>
+          </div>
+          <table><thead><tr><th>编号</th><th>站</th><th>片区</th><th>问题</th><th style="width:34%">情况</th><th>紧急程度</th><th>发现时间</th><th>状态</th><th>操作</th></tr></thead><tbody id="alertBody"></tbody></table>
+          <div class="pager" id="alertPager"></div>
         </div>
       </div>
     </section>
@@ -675,7 +682,7 @@
           : t.status === "done" ? '<span class="readonly-note">—</span>'
           : `<a data-id="${t.ticket_id}">${NEXT_LABEL[t.status]}</a>`;
         return `<tr><td class="num" style="text-align:left">WO-${String(t.ticket_id).padStart(4, "0")}</td><td>站点 ${t.station_id}</td>
-          <td><span class="tag gray">${TYPE_CN[t.type] || "其他"}</span></td><td><span class="tag ${color}">${cn}</span></td><td>${op}</td></tr>`;
+          <td><span class="tag gray">${TYPE_CN[t.type] || "其他"}</span>${t.alert_id != null ? `<span class="readonly-note" style="margin-left:6px">来自告警 AL-${String(t.alert_id).padStart(4, "0")}</span>` : ""}</td><td><span class="tag ${color}">${cn}</span></td><td>${op}</td></tr>`;
       }).join("") : `<tr><td colspan="5" class="empty">暂无工单</td></tr>`;
       body.querySelectorAll("a[data-id]").forEach(a => a.onclick = () => advanceTicket(+a.dataset.id, ticketList));
       pager($("ticketPager"), shown.length, 1, 10, () => {});
@@ -799,12 +806,20 @@
     $("mapZoneAll").onclick = () => pickZone("");
 
     /* ---------- 异常告警 ---------- */
-    const ALERT_KIND = { stuck: "读数不动", high_missing: "缺数偏多", long_gap: "长时间没数据", row_missing_rate: "整体缺数偏多" };
+    const ALERT_KIND = { dwd_stuck_cumulative_30d: "长期读数不动", dwd_stuck_stations_full_day: "当天读数不动的站偏多", dwd_stuck_new: "新增读数不动的站偏多",
+      dwd_high_missing_stations: "缺数偏多的站偏多", dwd_stuck_stations: "读数不动的站偏多", dwd_station_went_empty_any: "有站突然没数据", ods_busy_non_negative: "原始数据里有负数", ods_pk_unique: "原始数据有重复", ods_row_not_null_rate: "原始数据空值偏多", stuck: "读数不动", high_missing: "缺数偏多", long_gap: "长时间没数据", row_missing_rate: "整体缺数偏多" };
     const LAYER_CN = { ods: "原始数据", dwd: "清洗后数据", ads: "汇总结果" };
     const fmtVal = (v, asPct) => v == null ? "—" : asPct ? (v * 100).toFixed(1) + "%" : String(+(+v).toFixed(2));
+    // 后端 detail 里规则名、字段名一类的写法换成大白话
+    function alertText(a) {
+      const d = String(a.detail || "").replace(/^\[告警\]\s*/, "").replace(/（>=\s*[\d.]+\s*天）/, "");
+      if (/层规则|station_id|未通过/.test(d)) return `${ALERT_KIND[a.rule_name] || "整批数据检查没通过"}`;
+      return d;
+    }
     function alertDetail(a) {
       const parts = [];
-      if (a.detail) parts.push(a.detail);
+      const t = alertText(a);
+      if (t) parts.push(t);
       if (a.metric_value != null) { const pc = a.threshold != null && +a.threshold > 0 && +a.threshold < 1; parts.push(`实际 ${fmtVal(a.metric_value, pc)}${a.threshold != null ? `，上限 ${fmtVal(a.threshold, pc)}` : ""}`); }
       const where = [a.ds, LAYER_CN[a.layer] || a.layer].filter(Boolean).join(" · ");
       return `${parts.join("；") || "—"}${where ? `<div class="readonly-note">${where}</div>` : ""}`;
@@ -824,6 +839,18 @@
       const res = await fetch(`${API_BASE}/api/alerts/${id}`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify({ status }) });
       const json = await res.json(); if (!json.ok) throw new Error(json.error);
     }
+    let alertPage = 1;
+    async function dispatchTicket(a) {
+      const res = await fetch(`${API_BASE}/api/tickets`, { method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ station_id: a.station_id, type: "repair", alert_id: a.alert_id }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(res.status === 401 || res.status === 403 ? "没有权限，请先用管理员登录" : (json.error || "派单失败"));
+      a.status = "ack"; a.ticket_id = json.data.ticket.ticket_id;
+      ticketList.push(json.data.ticket); renderTickets(ticketList);
+      return json.data.ticket;
+    }
+    ["alertLevel", "alertZone"].forEach(id => $(id).onchange = () => { alertPage = 1; renderAlerts(); });
+    $("alertQ").oninput = () => { alertPage = 1; renderAlerts(); };
     async function loadAlerts() { alertList = (await fetchAlerts()).map(a => ({ ...a, status: a.status === "processing" ? "ack" : a.status })); renderAlerts(); }
     function renderAlerts() {
       const cnt = s => alertList.filter(a => s === "all" || a.status === s).length;
@@ -831,22 +858,41 @@
         .map(([k, n]) => `<div data-k="${k}" class="${k === alertFilter ? "active" : ""}">${n}<em>${cnt(k)}</em></div>`).join("");
       $("alertTabs").querySelectorAll("div").forEach(d => d.onclick = () => { alertFilter = d.dataset.k; renderAlerts(); });
       const isAdmin = currentUser.role === "admin";
-      const shown = alertList.filter(a => alertFilter === "all" || a.status === alertFilter);
+      const zones = [...new Set(alertList.map(a => a.taz_id).filter(v => v != null))].sort((x, y) => +x - +y);
+      const zSel = $("alertZone"), zKeep = zSel.value;
+      if (zSel.options.length !== zones.length + 1) { zSel.innerHTML = `<option value="">全部片区</option>` + zones.map(z => `<option value="${z}">片区 ${z}</option>`).join(""); zSel.value = zKeep; }
+      const lv = $("alertLevel").value, zv = zSel.value, q = $("alertQ").value.trim();
+      const all = alertList.filter(a => (alertFilter === "all" || a.status === alertFilter) && (!lv || a.level === lv)
+        && (!zv || String(a.taz_id) === zv) && (!q || String(a.station_id ?? "").includes(q)));
+      const size = 15, pages = Math.max(1, Math.ceil(all.length / size)); if (alertPage > pages) alertPage = pages;
+      const shown = all.slice((alertPage - 1) * size, alertPage * size);
+      $("alertCount").textContent = all.length === alertList.length ? "" : `筛出 ${all.length} 条`;
+      pager($("alertPager"), all.length, alertPage, size, n => { alertPage = n; renderAlerts(); });
       $("alertBody").innerHTML = shown.map(a => {
         const [sn, sc] = ALERT_STATUS[a.status] || ["未知", "gray"], [ln, lc] = ALERT_LEVEL[a.level] || ["提醒", "gray"];
         const op = !isAdmin ? '<span class="readonly-note">登录管理员后可处理</span>'
-          : a.status === "open" ? `<a data-id="${a.alert_id}" data-to="ack">开始处理</a> <a data-id="${a.alert_id}" data-to="closed" style="margin-left:8px">直接关闭</a>`
+          : a.status === "open" ? `${a.station_id != null ? `<a data-id="${a.alert_id}" data-to="ticket">派工单</a> ` : ""}<a data-id="${a.alert_id}" data-to="ack" style="margin-left:8px">开始处理</a> <a data-id="${a.alert_id}" data-to="closed" style="margin-left:8px">直接关闭</a>`
           : a.status === "ack" ? `<a data-id="${a.alert_id}" data-to="closed">处理完了</a>`
           : `<a data-id="${a.alert_id}" data-to="open">重新打开</a>`;
-        return `<tr><td class="num" style="text-align:left">AL-${String(a.alert_id).padStart(4, "0")}</td><td>${a.station_id == null ? "整批数据" : `站点 ${a.station_id}`}</td><td>${a.taz_id == null ? (a.station_id == null ? "全部片区" : "—") : `片区 ${a.taz_id}`}</td>
-          <td>${ALERT_KIND[a.kind] || a.rule_name || a.kind || "其他"}</td><td>${alertDetail(a)}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.created_at}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
+        return `<tr><td class="num" style="text-align:left">AL-${String(a.alert_id).padStart(4, "0")}</td><td>${a.station_id == null ? "整批数据" : `<a data-map="${a.taz_id ?? ""}" title="在地图上看所在片区">站点 ${a.station_id}</a>`}</td><td>${a.taz_id == null ? (a.station_id == null ? "全部片区" : "—") : `片区 ${a.taz_id}`}</td>
+          <td>${ALERT_KIND[a.kind] || a.rule_name || a.kind || "其他"}</td><td>${alertDetail(a)}</td><td><span class="tag ${lc}">${ln}</span></td><td>${a.ds || a.created_at || "—"}</td><td><span class="tag ${sc}">${sn}</span></td><td>${op}</td></tr>`;
       }).join("") || `<tr><td colspan="9" class="empty">没有这类告警</td></tr>`;
       $("alertBody").querySelectorAll("a[data-id]").forEach(el => el.onclick = async () => {
         const a = alertList.find(x => x.alert_id === +el.dataset.id); const to = el.dataset.to;
+        if (to === "ticket") {
+          try { const t = await dispatchTicket(a); renderAlerts(); toast(`已派工单 WO-${String(t.ticket_id).padStart(4, "0")}，告警转为「处理中」`); }
+          catch (e) { toast(e.message); }
+          return;
+        }
         try { await saveAlert(a.alert_id, to); a.status = to; renderAlerts(); toast(`告警 AL-${String(a.alert_id).padStart(4, "0")} 已改为「${ALERT_STATUS[to][0]}」`); }
         catch (e) { toast(`没改成：${e.message}`); }
       });
     }
+
+    $("alertBody").addEventListener("click", e => {
+      const m = e.target.closest("a[data-map]"); if (!m) return;
+      const z = m.dataset.map; go("map"); if (z) setTimeout(() => pickZone(z), 300);
+    });
 
     /* ---------- 数据加载（实时接口失败时回落到离线样例） ---------- */
     function rangeQs() {
