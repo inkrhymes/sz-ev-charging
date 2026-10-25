@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS ads_ticket (
   alert_id BIGINT NULL,          -- 来源质检告警 dq_alert.alert_id（可空）
   type VARCHAR(16) NOT NULL,
   status VARCHAR(16) NOT NULL,
+  started_at DATETIME NULL,      -- 首次进入 processing 的时间（开始处理）
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_alert_id (alert_id)

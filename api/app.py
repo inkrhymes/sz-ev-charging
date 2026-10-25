@@ -664,7 +664,8 @@ def baseline():
 def _ticket_out(r: dict) -> dict:
     fmt = lambda v: None if v is None else str(v)[:16]
     return {"ticket_id": r["ticket_id"], "station_id": r["station_id"], "type": r["type"], "status": r["status"],
-            "alert_id": r.get("alert_id"), "created_at": fmt(r.get("created_at")), "updated_at": fmt(r.get("updated_at"))}
+            "alert_id": r.get("alert_id"), "started_at": fmt(r.get("started_at")),
+            "created_at": fmt(r.get("created_at")), "updated_at": fmt(r.get("updated_at"))}
 
 
 def _ticket_db_call(fn):
@@ -713,7 +714,10 @@ def tickets_patch(ticket_id):
     if status not in {"open", "processing", "done"}:
         return err("status must be open|processing|done")
     def upd(cur):
-        if not cur.execute("UPDATE ads_ticket SET status=%s, updated_at=NOW() WHERE ticket_id=%s", (status, ticket_id)):
+        # started_at：第一次进入 processing 时记下开始处理时间，之后不再改（见 sql/migrations/20261025_ads_ticket_started_at.sql）
+        sql = ("UPDATE ads_ticket SET status=%s, updated_at=NOW()"
+               + (", started_at=COALESCE(started_at, NOW())" if status == "processing" else "") + " WHERE ticket_id=%s")
+        if not cur.execute(sql, (status, ticket_id)):
             cur.execute("SELECT 1 FROM ads_ticket WHERE ticket_id=%s", (ticket_id,))
             if not cur.fetchone():
                 return None
@@ -725,6 +729,8 @@ def tickets_patch(ticket_id):
     for t in tickets_store():
         if t["ticket_id"] == ticket_id:
             t["status"] = status
+            if status == "processing" and not t.get("started_at"):
+                t["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
             return ok(t)
     return err("ticket not found", 404)
 

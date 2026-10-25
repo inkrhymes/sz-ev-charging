@@ -88,3 +88,13 @@ def test_routes_registered_on_import():
 def test_map_zones_not_405():
     m = importlib.import_module("app")
     assert m.app.test_client().get("/api/map/zones").status_code == 200
+
+
+def test_ticket_processing_sets_started_at_once(db):
+    client, log = db
+    client.patch("/api/tickets/7", json={"status": "processing"}, headers=ADMIN)
+    q = next(q for q in log if "UPDATE ads_ticket" in q)
+    assert "started_at=COALESCE(started_at, NOW())" in q
+    log.clear()
+    client.patch("/api/tickets/7", json={"status": "done"}, headers=ADMIN)
+    assert not any("started_at" in q for q in log if "UPDATE" in q)
