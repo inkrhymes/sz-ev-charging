@@ -1,6 +1,8 @@
 """sz_ev_daily：按天分区 ds 的离线链路，质检不通过即阻断下游。
 
 ods_ingest -> dq_ods -> dwd_build -> dq_dwd -> ads_build -> dq_ads -> publish
+publish -> forecast_daily -> forecast_evaluate；publish -> weather_join；publish -> site_suggest
+扩展任务退出码：0 成功，2 跳过（AirflowSkipException），3 重试（retries=2），其他直接失败不重试。
 任务本身只调用 orchestration/tasks.py 里的薄包装，具体逻辑在各负责人的脚本中。
 """
 from __future__ import annotations
@@ -14,6 +16,7 @@ REPO = os.getenv("REPO_ROOT", os.path.abspath(os.path.join(os.path.dirname(__fil
 sys.path.insert(0, REPO)
 
 from airflow import DAG  # noqa: E402
+from airflow.exceptions import AirflowFailException, AirflowSkipException  # noqa: E402
 from airflow.operators.python import PythonOperator  # noqa: E402
 
 from orchestration import tasks  # noqa: E402
@@ -62,3 +65,28 @@ with DAG(
              build("publish", tasks.publish)]
     for a, b in zip(chain, chain[1:]):
         a >> b
+
+    def extra(name, fn, **kw):
+        inner = tasks.recorded(name, fn, "airflow")
+
+        def call(ds):
+            try:
+                return inner(ds)
+            except tasks.TaskSkipped as e:
+                raise AirflowSkipException(str(e)) from e
+            except tasks.TaskRetryable:
+                raise                                  # 走 retries=2
+            except Exception as e:
+                raise AirflowFailException(str(e)) from e
+        call.__name__ = name
+        return PythonOperator(task_id=name, python_callable=call, op_kwargs={"ds": "{{ ds }}"}, retries=2, **kw)
+
+    ex = dict(tasks.AFTER_PUBLISH)
+    publish = chain[-1]
+    f_daily = extra("forecast_daily", ex["forecast_daily"])
+    # 评估的是 ds 当天（前一天的预测）：今天的预测被跳过也照样评估；预测失败或 publish 没成功则不评估
+    f_eval = extra("forecast_evaluate", ex["forecast_evaluate"], trigger_rule="none_failed")
+    publish >> f_daily >> f_eval
+    publish >> f_eval
+    publish >> extra("weather_join", ex["weather_join"])
+    publish >> extra("site_suggest", ex["site_suggest"])

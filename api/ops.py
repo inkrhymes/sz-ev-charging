@@ -14,10 +14,10 @@ import re
 from datetime import date, datetime
 
 CHAIN = ["ods_ingest", "dq_ods", "dwd_build", "dq_dwd", "ads_build", "dq_ads", "publish"]
-EXTRA = ["forecast_daily", "weather_join", "site_suggest"]  # publish 之后的扩展任务，没跑过就不出现
+EXTRA = ["forecast_daily", "forecast_evaluate", "weather_join", "site_suggest"]  # publish 之后的扩展任务，没跑过就不出现
 TASK_LABEL = {"ods_ingest": "原始数据入湖", "dq_ods": "原始层质检", "dwd_build": "清洗", "dq_dwd": "清洗层质检",
               "ads_build": "汇总计算", "dq_ads": "汇总层质检", "publish": "写入数据库",
-              "forecast_daily": "次日预测", "weather_join": "关联天气", "site_suggest": "选址补桩建议"}
+              "forecast_daily": "次日预测", "forecast_evaluate": "预测评估", "weather_join": "关联天气", "site_suggest": "选址补桩建议"}
 SOURCE_LABEL = {"airflow": "Airflow", "run_day": "本地执行器", "backfill_airflow": "Airflow（补录）",
                 "backfill_dq": "质检日志（补录）", "backfill_range": "全量入湖（补录，耗时为按天平摊的估算）"}
 _DS = re.compile(r"^\d{4}-\d{2}-\d{2}$")

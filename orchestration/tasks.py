@@ -128,6 +128,68 @@ CHAIN = [
 ]
 
 
+# ---------- publish 之后的扩展任务 ----------
+# 子进程退出码约定：0 成功；2 输入不足 → 跳过（不算失败）；3 可重试（如写 MySQL 失败）；其他 → 失败
+WEATHER_JOIN = ROOT / "spark" / "jobs" / "weather_join.py"
+SITE_SUGGEST = ROOT / "spark" / "jobs" / "site_suggest.py"
+
+
+class TaskSkipped(Exception):
+    """输入不足等情况，本步不执行；Airflow 里转成 AirflowSkipException。"""
+
+
+class TaskRetryable(Exception):
+    """可重试的失败（退出码 3），Airflow 按 retries 重试。"""
+
+
+def _child_env() -> dict:
+    env = dict(os.environ)
+    env.setdefault("SZ_EV_LAKE", str(REAL_LAKE))  # MYSQL_* 原样透传
+    return env
+
+
+def _run_rc(cmd: list[str], name: str) -> None:
+    print("[run]", " ".join(cmd), flush=True)
+    rc = subprocess.run(cmd, cwd=ROOT, env=_child_env()).returncode
+    if rc == 0:
+        return
+    if rc == 2:
+        raise TaskSkipped(f"{name}：输入不足（退出码 2），本步跳过")
+    if rc == 3:
+        raise TaskRetryable(f"{name}：可重试错误（退出码 3），如写 MySQL 失败")
+    raise RuntimeError(f"{name}：退出码 {rc}")
+
+
+def forecast_daily(ds: str) -> None:
+    _run_rc([sys.executable, "-m", "forecast.daily", "--ds", ds], "forecast_daily")
+
+
+def forecast_evaluate(ds: str) -> None:
+    _run_rc([sys.executable, "-m", "forecast.evaluate", "--ds", ds], "forecast_evaluate")
+
+
+def _optional_script(path: Path, name: str):
+    def fn(ds: str) -> None:
+        if not path.exists():
+            rel = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+            raise TaskSkipped(f"{name}：{rel} 尚未提供，本步跳过")
+        _run_rc([sys.executable, str(path), "--ds", ds], name)
+    fn.__name__ = name
+    return fn
+
+
+weather_join = _optional_script(WEATHER_JOIN, "weather_join")
+site_suggest = _optional_script(SITE_SUGGEST, "site_suggest")
+
+# publish 成功后执行；彼此独立，一个失败/跳过不影响其他
+AFTER_PUBLISH = [
+    ("forecast_daily", forecast_daily),
+    ("forecast_evaluate", forecast_evaluate),   # 评估 ds 当天（前一天的预测）；今天预测跳过照评，预测失败则跳过（同 DAG none_failed）
+    ("weather_join", weather_join),
+    ("site_suggest", site_suggest),
+]
+
+
 def recorded(name: str, fn, source: str = "airflow"):
     """包一层运行记录：开始/结束/状态/拦截原因写 ops_task_run，异常照常抛出（Airflow 据此判失败）。"""
     # 只接 ds/write_db：Airflow 遇到 **kwargs 会把整个 context 塞进来
@@ -135,6 +197,10 @@ def recorded(name: str, fn, source: str = "airflow"):
         start = datetime.now()
         try:
             out = fn(ds, write_db=write_db) if name.startswith("dq_") else fn(ds)
+        except TaskSkipped as e:
+            if write_db:
+                run_log.record(name, ds, "skipped", start, datetime.now(), str(e), source)
+            raise
         except Exception as e:
             if write_db:
                 state = "blocked" if isinstance(e, engine.DQBlockError) else "failed"
@@ -166,4 +232,25 @@ def run_chain(ds: str, write_db: bool = True, source: str = "run_day") -> list[t
             print(f"[fail] {name}: {e}", flush=True)
             timings.append((name, "failed", time.perf_counter() - t0))
             failed = True
+    for name, fn in AFTER_PUBLISH:
+        if name == "forecast_evaluate" and any(n == "forecast_daily" and st == "failed" for n, st, _ in timings):
+            failed_daily = True
+        else:
+            failed_daily = False
+        if failed or failed_daily:
+            timings.append((name, "skipped", 0.0))
+            if write_db:
+                now = datetime.now()
+                run_log.record(name, ds, "skipped", now, now, "上游任务未通过，本步未执行", source)
+            continue
+        t0 = time.perf_counter()
+        try:
+            recorded(name, fn, source)(ds, write_db=write_db)
+            timings.append((name, "success", time.perf_counter() - t0))
+        except TaskSkipped as e:
+            print(f"[skip] {e}", flush=True)
+            timings.append((name, "skipped", time.perf_counter() - t0))
+        except Exception as e:  # 扩展任务失败只记 failed，不影响同一天其他扩展任务
+            print(f"[fail] {name}: {e}", flush=True)
+            timings.append((name, "failed", time.perf_counter() - t0))
     return timings

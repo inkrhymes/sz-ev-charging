@@ -17,6 +17,7 @@ def recorded(monkeypatch):
     from orchestration import run_log, tasks
     calls = []
     monkeypatch.setattr(run_log, "record", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(tasks, "AFTER_PUBLISH", [])  # 扩展任务另见 tests/orchestration/test_dag.py
     return tasks, calls
 
 
