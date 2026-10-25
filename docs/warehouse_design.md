@@ -37,7 +37,7 @@ UrbanEV 原始 CSV ──etl/full_pipeline.py──▶ 数据湖（Parquet，按
 清洗口径沿用 `etl/clean_to_dwd.py`：
 
 - 整行缺数：`busy` 与 `idle` 同时为空；
-- 读数不动：有效点 ≥ 12 且 `busy` 只有一个取值。DWD 行级标记按「站 × 天」计算，以保证单日分区可独立重算；ADS 汇总指标 `stuck_station_cnt` 按整个已入仓窗口计算，与演示子集口径一致；
+- 读数不动：有效点 ≥ 12 且 `busy` 只有一个取值。DWD 行级标记按「站 × 天」计算，以保证单日分区可独立重算；ADS 汇总指标的卡死口径见下文「quality_summary 各指标含义」；
 - 异常：按「站 × 天」对 `busy` 做 1.5 × IQR（有效点 ≥ 8 且 IQR > 0），只打标不删行；
 - 占用率：`occupancy = busy / total_piles`（非缺数且桩数 > 0）；
 - 工单建议：读数不动 → `repair`，缺数比例 > 30% → `inspect`。
@@ -53,7 +53,7 @@ UrbanEV 原始 CSV ──etl/full_pipeline.py──▶ 数据湖（Parquet，按
 ## 4. 幂等
 
 - Hive 写入统一使用 `INSERT OVERWRITE TABLE … PARTITION (dt)`，并开启 `spark.sql.sources.partitionOverwriteMode=dynamic`：只替换本次涉及的分区，其他分区不受影响。同一天重复运行，结果行数不变（实测见 `docs/perf/spark_baseline.md` §3）。
-- MySQL 回写：按日期范围 `DELETE` 后批量 `INSERT`，在同一事务内提交；不分区的表（`ads_quality_summary`、`dim_station`）使用 `REPLACE INTO`。
+- MySQL 回写：按日期范围 `DELETE` 后批量 `INSERT`，在同一事务内提交；`dim_station` 使用 `REPLACE INTO`；`ads_quality_summary` 是整表快照，先整表 `DELETE` 再 `INSERT`，避免旧指标残留。
 - 读取输入时，缺失的日期分区会跳过并打印提示，不会写出空分区覆盖已有数据。
 
 ## 5. 增量与补跑
@@ -148,3 +148,24 @@ spark/run_range.sh --start 2022-09-01 --end 2022-09-14 --dry-run
 ```
 
 数据湖、仓库目录与 Metastore（`data/lake/`、`data/warehouse/`、`spark/_metastore/`、`spark/_runs/`）均已加入 `.gitignore`。
+
+
+## quality_summary 各指标含义
+
+`ads.quality_summary` / MySQL `ads_quality_summary` 每行一个指标（metric, value, note）。卡死相关的数字和告警、工单用同一份来源：`etl/full_pipeline.py` 产出的站级质量表 `$SZ_EV_LAKE/dwd/quality_station/run=<起>_<止>/`（自动取覆盖天数最多的那次运行，可用 `SZ_QUALITY_STATION` 指定）。Spark 只读这张表，不自己重算。
+
+| metric | 大白话 |
+|---|---|
+| `station_cnt` | 数仓里有数据的站一共多少座。 |
+| `row_missing_rate` | 所有 5 分钟读数里，整行没数据的占多少（按行数加权）。 |
+| `high_missing_station_cnt` | 缺数超过 30% 的站有几座。 |
+| `stuck_station_cnt` | **累计卡死 ≥30 天的站数**。某站某天有效读数 ≥12 条、但读数从头到尾一个值，就算这天“卡死”；一站累计卡死满 30 天就计入。和 dq_alert 的累计卡死告警、维修工单阈值是同一口径。 |
+| `stuck_any_day_cnt` | 半年里至少卡死过一天的站数。 |
+| `stuck_whole_window_cnt` | 全程卡死：整个已入仓时间段里读数从没变过的站（以前的 `stuck_station_cnt` 就是这个口径）。由 Spark 用 `ads.station_busy_day` 增量计算。 |
+| `repair_ticket_cnt` | 质量表建议派**维修**工单的站数（`ticket_suggest = repair`）。 |
+| `inspect_ticket_cnt` | 建议派**巡检**工单的站数（`ticket_suggest = inspect`，缺数多但没到维修）。 |
+
+找不到站级质量表时，后四项里来自质量表的四个指标（`stuck_station_cnt`、`stuck_any_day_cnt`、`repair_ticket_cnt`、`inspect_ticket_cnt`）不输出，不会用别的口径顶替。
+`city_overview.stuck_cnt` 是另一回事：当天被标记为卡死的站数（按天统计），不是累计。
+
+`ads_zone_occupancy_hour.load_kw_est`（= 占用率 × 片区额定功率之和）目前全为 NULL：UrbanEV 站点表只有站点位置和慢充/快充桩数，没有额定功率字段，算不出来，所以如实留空，没有用假设功率去估。

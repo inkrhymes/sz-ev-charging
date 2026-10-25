@@ -20,6 +20,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spark.jobs.common import ROOT, Perf, date_args, in_list, resolve_dates, spark_session  # noqa: E402
 
 HIGH_MISSING_THR = 0.30
+REPAIR_STUCK_DAYS = 30  # 与 etl/full_pipeline.py 一致
+
+
+def quality_station_path() -> str | None:
+    """站级质量表：$SZ_QUALITY_STATION，否则取 $SZ_EV_LAKE/dwd/quality_station/ 下覆盖天数最多的 run=<start>_<end>。"""
+    import datetime as _d
+    env = os.environ.get("SZ_QUALITY_STATION")
+    if env:
+        return env if Path(env).exists() else None
+    from spark.jobs.common import LAKE
+    best, span = None, -1
+    for d in (LAKE / "dwd" / "quality_station").glob("run=*_*"):
+        try:
+            a, b = d.name[4:].split("_")
+            n = (_d.date.fromisoformat(b) - _d.date.fromisoformat(a)).days
+        except ValueError:
+            continue
+        if n > span and any(d.glob("*.parquet")):
+            best, span = str(d), n
+    return best
 EXPORT = Path(os.environ.get("SZ_ADS_EXPORT", ROOT / "data" / "lake" / "export" / "ads"))
 
 
@@ -102,6 +122,12 @@ def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts
     perf.step("station_busy_day", len(todo), t, recomputed_days=len(todo))
 
     t = time.time()
+    # 卡死口径对齐 dq_alert / 工单：直接读 etl/full_pipeline.py 产出的站级质量表（累计卡死天数 stuck_days、
+    # ticket_suggest），不在 Spark 里重算；表不存在时这几项不出（不编数）。
+    qs = quality_station_path()
+    has_qs = qs is not None
+    if has_qs:
+        spark.read.parquet(qs).createOrReplaceTempView("v_quality_station")
     spark.sql(f"""INSERT OVERWRITE TABLE ads.quality_summary
       WITH w AS (SELECT station_id,
                         CASE WHEN SUM(valid_cnt) >= 12 AND MIN(min_busy) = MAX(max_busy) THEN 1 ELSE 0 END st
@@ -110,9 +136,18 @@ def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts
                  FROM dwd.quality_station_day q JOIN w ON q.station_id=w.station_id GROUP BY q.station_id)
       SELECT 'station_cnt', CAST(COUNT(*) AS DOUBLE), '已入仓站点数' FROM s
       UNION ALL SELECT 'row_missing_rate', SUM(m)/SUM(r), '整行缺数比例（按行加权，全部已入仓分区）' FROM s
-      UNION ALL SELECT 'stuck_station_cnt', CAST(SUM(st) AS DOUBLE), '整个已入仓窗口内读数不动的站（口径同 etl/clean_to_dwd.py）' FROM s
+      UNION ALL SELECT 'stuck_whole_window_cnt', CAST(SUM(st) AS DOUBLE), '整个已入仓窗口内读数从没变过的站（全程卡死）' FROM s
       UNION ALL SELECT 'high_missing_station_cnt', CAST(SUM(CASE WHEN m/r > {HIGH_MISSING_THR} THEN 1 ELSE 0 END) AS DOUBLE),
-                       '缺数比例>30% 的站' FROM s""")
+                       '缺数比例>30% 的站' FROM s
+      {"" if not has_qs else f"""
+      UNION ALL SELECT 'stuck_station_cnt', CAST(SUM(CASE WHEN stuck_days >= {REPAIR_STUCK_DAYS} THEN 1 ELSE 0 END) AS DOUBLE),
+                       '累计卡死≥{REPAIR_STUCK_DAYS}天的站（口径同 dq_alert，读 dwd/quality_station.stuck_days）' FROM v_quality_station
+      UNION ALL SELECT 'stuck_any_day_cnt', CAST(SUM(CASE WHEN stuck_days > 0 THEN 1 ELSE 0 END) AS DOUBLE),
+                       '至少有一天卡死的站' FROM v_quality_station
+      UNION ALL SELECT 'repair_ticket_cnt', CAST(SUM(CASE WHEN ticket_suggest = 'repair' THEN 1 ELSE 0 END) AS DOUBLE),
+                       '建议维修工单的站（dwd/quality_station.ticket_suggest=repair）' FROM v_quality_station
+      UNION ALL SELECT 'inspect_ticket_cnt', CAST(SUM(CASE WHEN ticket_suggest = 'inspect' THEN 1 ELSE 0 END) AS DOUBLE),
+                       '建议巡检工单的站（ticket_suggest=inspect）' FROM v_quality_station"""}""")
     perf.step("quality_summary", spark.table("ads.quality_summary").count(), t)
 
 
@@ -157,6 +192,10 @@ def export(spark, perf, dates, dl, dry_run: bool):
         with conn.cursor() as cur:
             if date_expr:
                 cur.execute(f"DELETE FROM {table} WHERE {date_expr} BETWEEN %s AND %s", (dates[0], dates[-1]))
+                verb = "INSERT"
+            elif table == "ads_quality_summary":
+                # 全表快照：整表替换，避免旧口径/演示指标残留
+                cur.execute(f"DELETE FROM {table}")
                 verb = "INSERT"
             else:
                 verb = "REPLACE"
