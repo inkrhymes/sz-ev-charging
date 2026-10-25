@@ -115,9 +115,12 @@ UrbanEV 原始 CSV ──etl/full_pipeline.py──▶ 数据湖（Parquet，按
 | longitude / latitude | DECIMAL(10,6) | 经纬度，取自 UrbanEV `station_information.csv`（原文件未注明坐标系） |
 | slow_count / fast_count | INT | 慢充 / 快充桩数 |
 | total_piles | INT | 总桩数（`charge_count`） |
-| rated_power_kw | DECIMAL(10,2) | 额定功率；UrbanEV 站点表无此字段，全量下为空 |
+| rated_power_kw | DECIMAL(10,2) | 站额定功率；湖里没有这列时取 `rated_power_kw_total` |
+| rated_power_kw_total | DECIMAL(12,2) | 站内各桩额定功率加起来（小紫 `etl/pile_power.py` 从桩级数据算的）；**130 个站没有功率数据，为 NULL** |
+| dc_pile_cnt / ac_pile_cnt | INT | 直流 / 交流桩数（来自桩级功率数据） |
+| pile_cnt_from_power | INT | 桩级功率数据里数到的桩数（可能和 `total_piles` 不一样，`total_piles` 来自 UrbanEV 站点表） |
 
-说明：`ads_zone_occupancy_hour.load_kw_est = 片区占用率 × 片区额定功率之和`，因全量站点表缺少额定功率，全量运行时该列为空。
+说明：`load_kw_est`、`power_coverage` 的口径见下文“片区负荷估算”。
 
 ## 7. Metastore 选型
 
@@ -165,10 +168,20 @@ spark/run_range.sh --start 2022-09-01 --end 2022-09-14 --dry-run
 | `repair_ticket_cnt` | 质量表建议派**维修**工单的站数（`ticket_suggest = repair`）。 |
 | `inspect_ticket_cnt` | 建议派**巡检**工单的站数（`ticket_suggest = inspect`，缺数多但没到维修）。 |
 
+站级质量表默认只读 `dwd/quality_station/` 下覆盖天数最多的那个 `run=<start>_<end>` 目录，现在是 `run=2022-09-01_2023-02-28`。同一层的单日/短区间旧结果（如 `run=2022-09-01_2022-09-01`、`run=2022-09-02_2022-09-07`）不会读进来；`SZ_QUALITY_STATION` 可以显式指定。
 找不到站级质量表时，后四项里来自质量表的四个指标（`stuck_station_cnt`、`stuck_any_day_cnt`、`repair_ticket_cnt`、`inspect_ticket_cnt`）不输出，不会用别的口径顶替。
 `city_overview.stuck_cnt` 是另一回事：当天被标记为卡死的站数（按天统计），不是累计。
 
-`ads_zone_occupancy_hour.load_kw_est`（= 占用率 × 片区额定功率之和）目前全为 NULL：UrbanEV 站点表只有站点位置和慢充/快充桩数，没有额定功率字段，算不出来，所以如实留空，没有用假设功率去估。
+## 片区负荷估算（load_kw_est / power_coverage）
+
+大白话：**这个片区这一小时大概在用多少千瓦 = 这一小时的占用率 × 片区里“有功率数据的站”的额定功率加起来。**
+
+- `load_kw_est = occupancy × Σ rated_power_kw_total`，Σ 只加 `rated_power_kw_total` 不为空的站。
+- 片区里一个有功率数据的站都没有 → `load_kw_est` 为 NULL（不猜）。占用率为空的小时，`load_kw_est` 也为空。
+- `power_coverage = 有功率数据的站的桩数 ÷ 片区全部桩数`（桩数用 `total_piles`，即 UrbanEV 的 `charge_count`），**按桩数算，不是按站数**。1 表示片区内的桩全有功率数据；0.5 表示只有一半桩的功率算进去了，此时 `load_kw_est` 偏低，看的时候要结合这一列。
+- 站点表共 1682 站，其中 **130 站缺功率**（`rated_power_kw_total` 为空）。所以全市只有一部分桩的功率被算进去，具体比例看 `power_coverage` 这一列。缺功率的站照常参与占用率计算，只是不进功率求和。
+- 两边同一个口径：Spark 用 `ads_metrics.ZONE_POWER_SQL`，pandas 用 `export_ads_parquet.zone_power`，`tests/test_zone_power.py` 核对两边结果一致。
+- 刷新：`export_ads_parquet.py --only load_kw --start .. --end .. [--exclude D]` 只 UPDATE 这两列，不动其他列。Hive 里旧的 `ads.zone_occupancy_hour` 分区要等下次 `ads_build` 才会带上新值；回写 MySQL 时 export_ads_parquet 总是按站点表重新计算，不用 Parquet 里的旧值。
 
 ## 不起 Spark 的回写路径（MySQL 重建后用）
 

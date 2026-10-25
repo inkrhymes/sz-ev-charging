@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spark.jobs.common import DEFAULT_DWD_LAKE, LAKE, Perf, date_args, in_list, resolve_dates, spark_session  # noqa: E402
 from spark.jobs.dwd_clean import aggregate, ensure_dwd_tables  # noqa: E402
 from spark.jobs.ads_metrics import build  # noqa: E402
-from spark.jobs.ods_load import load_station_info  # noqa: E402
+from spark.jobs.ods_load import ensure_station_info_table, load_station_info  # noqa: E402
 
 
 def main() -> None:
@@ -40,10 +40,7 @@ def main() -> None:
     perf = Perf("ads_build", dates)
 
     t = time.time()
-    spark.sql("CREATE DATABASE IF NOT EXISTS ods")
-    spark.sql("""CREATE TABLE IF NOT EXISTS ods.station_info (
-        station_id STRING, taz_id STRING, longitude DOUBLE, latitude DOUBLE,
-        slow_count INT, fast_count INT, total_piles INT, rated_power_kw DOUBLE, src STRING) STORED AS PARQUET""")
+    ensure_station_info_table(spark)
     src = load_station_info(spark, a.station_info)
     spark.sql("INSERT OVERWRITE TABLE ods.station_info SELECT * FROM v_info")
     perf.step("station_info", spark.table("ods.station_info").count(), t, source=src)

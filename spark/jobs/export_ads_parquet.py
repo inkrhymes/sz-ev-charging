@@ -7,8 +7,12 @@
   $SZ_EV_LAKE/ods/station_info/*.parquet → dim_station
   $SZ_EV_LAKE/dwd/quality_station/run=*（累计卡死/工单建议，口径同 ads_metrics.quality_station_path）
 注意：Hive 表 ts_hour 是 Spark 写的 INT96（UTC 存储），这里按 SZ_SPARK_TZ（默认 Asia/Shanghai）还原成本地时间。
+load_kw_est / power_coverage 在这里用 pandas 按 ods/station_info 重算（口径同 ads_metrics.ZONE_POWER_SQL），不取 Parquet 里的旧值。
 用法：
   export_ads_parquet.py --start 2022-09-01 --end 2023-02-28 [--exclude 2022-09-02 ...] [--dry-run]
+  export_ads_parquet.py --only quality_summary --only dim_station        # 只刷这两张小表
+  export_ads_parquet.py --only load_kw --start ... --end ... --exclude 2022-09-02
+      # 只 UPDATE ads_zone_occupancy_hour 的 load_kw_est、power_coverage 两列，其他列/其他表不动
 幂等：每张分区表只 DELETE 本次要写的日期（被 --exclude 的日期原样保留），再批量 INSERT，单表一个事务。
 """
 from __future__ import annotations
@@ -32,13 +36,61 @@ REPAIR_STUCK_DAYS = 30
 PART_TABLES = {
     "ads_city_overview": ("city_overview", ["dt", "station_cnt", "zone_cnt", "avg_occupancy", "peak_hour", "stuck_cnt",
                                             "high_missing_cnt"], "dt", {"avg_occupancy": 6}),
-    "ads_zone_occupancy_hour": ("zone_occupancy_hour", ["taz_id", "ts_hour", "occupancy", "load_kw_est"], "DATE(ts_hour)",
-                                {"occupancy": 6, "load_kw_est": 2}),
+    "ads_zone_occupancy_hour": ("zone_occupancy_hour", ["taz_id", "ts_hour", "occupancy", "load_kw_est", "power_coverage"],
+                                "DATE(ts_hour)", {"occupancy": 6, "load_kw_est": 2, "power_coverage": 6}),
     "ads_baseline_naive": ("baseline_naive", ["taz_id", "ts_hour", "y_true", "y_hat_lag1", "abs_err"], "DATE(ts_hour)",
                            {"y_true": 6, "y_hat_lag1": 6, "abs_err": 6}),
     "ads_zone_daily": ("zone_daily", ["dt", "taz_id", "avg_occupancy", "station_cnt", "pile_cnt", "center_lon",
                                       "center_lat"], "dt", {"avg_occupancy": 6, "center_lon": 6, "center_lat": 6}),
 }
+
+
+DIM_COLS = ["station_id", "taz_id", "longitude", "latitude", "slow_count", "fast_count", "total_piles", "rated_power_kw",
+            "rated_power_kw_total", "dc_pile_cnt", "ac_pile_cnt", "pile_cnt_from_power"]
+# 表结构缺列时补上（同 sql/migrations/20261025_station_power.sql）
+SCHEMA_ADD = {
+    "dim_station": [("rated_power_kw_total", "DECIMAL(12,2) NULL"), ("dc_pile_cnt", "INT NULL"), ("ac_pile_cnt", "INT NULL"),
+                    ("pile_cnt_from_power", "INT NULL")],
+    "ads_zone_occupancy_hour": [("power_coverage", "DECIMAL(7,6) NULL")],
+}
+
+
+def station_info():
+    return pq.ParquetDataset(str(LAKE / "ods" / "station_info")).read().to_pandas()
+
+
+def zone_power(t) -> "pd.DataFrame":
+    """片区功率，口径同 ads_metrics.ZONE_POWER_SQL：
+    kw_sum = 片区内 rated_power_kw_total 非空站的功率之和（全空 → NaN/NULL）；
+    power_coverage = 有功率数据站的桩数 / 片区全部桩数（桩数 = charge_count/total_piles）。"""
+    import pandas as pd
+    taz = next(c for c in ("taz_id", "TAZID") if c in t)
+    piles_c = next((c for c in ("charge_count", "total_piles") if c in t), None)
+    kw = t["rated_power_kw_total"] if "rated_power_kw_total" in t else pd.Series(float("nan"), index=t.index)
+    piles = t[piles_c].fillna(0).astype(float) if piles_c else pd.Series(0.0, index=t.index)
+    d = pd.DataFrame({"taz_id": t[taz].astype(str), "kw": kw.astype(float), "piles": piles,
+                      "piles_kw": piles.where(kw.notna(), 0.0)})
+    g = d.groupby("taz_id")
+    out = pd.DataFrame({"kw_sum": g["kw"].sum(min_count=1), "piles": g["piles"].sum(), "piles_kw": g["piles_kw"].sum()})
+    out["power_coverage"] = (out.piles_kw / out.piles.where(out.piles > 0)).astype(float)
+    return out[["kw_sum", "power_coverage"]].reset_index()
+
+
+_ZP = None
+
+
+def _zone_power_cached():
+    global _ZP
+    if _ZP is None:
+        _ZP = zone_power(station_info())
+    return _ZP
+
+
+def apply_zone_power(df, zp):
+    """df 含 taz_id/occupancy（未舍入的原始 double）→ 填 load_kw_est、power_coverage。"""
+    df = df.drop(columns=[c for c in ("load_kw_est", "power_coverage") if c in df]).merge(zp, on="taz_id", how="left")
+    df["load_kw_est"] = df["occupancy"] * df["kw_sum"]
+    return df.drop(columns=["kw_sum"])
 
 
 def dates_from(a) -> list[str]:
@@ -62,6 +114,9 @@ def read_part(table: str, cols: list[str], rnd: dict, d: str):
                          .dt.strftime("%Y-%m-%d %H:%M:%S"))
     if "dt" in cols:
         df["dt"] = d
+    if "load_kw_est" in cols:
+        df["taz_id"] = df["taz_id"].astype(str)
+        df = apply_zone_power(df, _zone_power_cached())
     for c, n in rnd.items():
         df[c] = df[c].round(n)
     df = df[cols].astype(object).where(df[cols].notna(), None)
@@ -110,16 +165,56 @@ def quality_rows() -> list[tuple]:
 
 
 def station_rows() -> list[tuple]:
-    t = pq.ParquetDataset(str(LAKE / "ods" / "station_info")).read().to_pandas()
+    t = station_info()
     pick = lambda *ns: next((t[n] for n in ns if n in t), None)  # noqa: E731
     out = []
-    rp = pick("rated_power_kw")
+    rp = pick("rated_power_kw", "rated_power_kw_total")  # 旧列 rated_power_kw 没有时用站总额定功率
     for i in range(len(t)):
         g = lambda s: None if s is None or s.iloc[i] != s.iloc[i] else s.iloc[i]  # noqa: E731
+        r2 = lambda v: None if v is None else round(float(v), 2)  # noqa: E731
         out.append((str(t.station_id.iloc[i]), str(g(pick("taz_id", "TAZID"))), round(float(g(pick("longitude"))), 6),
                     round(float(g(pick("latitude"))), 6), g(pick("slow_count")), g(pick("fast_count")),
-                    g(pick("charge_count", "total_piles")), None if rp is None else g(rp)))
+                    g(pick("charge_count", "total_piles")), r2(g(rp)), r2(g(pick("rated_power_kw_total"))),
+                    g(pick("dc_pile_cnt")), g(pick("ac_pile_cnt")), g(pick("pile_cnt_from_power"))))
     return [tuple(None if v is None else (v.item() if hasattr(v, "item") else v) for v in r) for r in out]
+
+
+def ensure_schema(conn) -> None:
+    with conn.cursor() as cur:
+        for t, cols in SCHEMA_ADD.items():
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=%s", (t,))
+            have = {r[0].lower() for r in cur.fetchall()}
+            add = [f"ADD COLUMN {c} {ty}" for c, ty in cols if c not in have]
+            if add:
+                cur.execute(f"ALTER TABLE {t} {', '.join(add)}")
+                print(f"[export_ads_parquet] ALTER {t}: {', '.join(add)}", flush=True)
+    conn.commit()
+
+
+def update_load_kw(conn, dates: list[str], missing: dict) -> None:
+    """只 UPDATE ads_zone_occupancy_hour.load_kw_est / power_coverage（按主键 taz_id+ts_hour），一天一个事务。"""
+    ht, cols, _, rnd = PART_TABLES["ads_zone_occupancy_hour"]
+    t0, n, changed = time.time(), 0, 0
+    cur = conn.cursor() if conn else None
+    if cur:
+        cur.execute("CREATE TEMPORARY TABLE IF NOT EXISTS tmp_zoh_kw (taz_id VARCHAR(32) NOT NULL, ts_hour DATETIME NOT NULL, "
+                    "load_kw_est DECIMAL(12,2) NULL, power_coverage DECIMAL(7,6) NULL, PRIMARY KEY (taz_id, ts_hour))")
+    for d in dates:
+        df = read_part(ht, cols, rnd, d)
+        if df is None:
+            missing.setdefault("ads_zone_occupancy_hour(load_kw)", []).append(d); continue
+        rows = list(df[["taz_id", "ts_hour", "load_kw_est", "power_coverage"]].itertuples(index=False, name=None))
+        n += len(rows)
+        if not cur:
+            continue
+        cur.execute("DELETE FROM tmp_zoh_kw")
+        for j in range(0, len(rows), 5000):
+            cur.executemany("INSERT INTO tmp_zoh_kw VALUES (%s,%s,%s,%s)", rows[j:j + 5000])
+        changed += cur.execute("UPDATE ads_zone_occupancy_hour z JOIN tmp_zoh_kw k ON z.taz_id=k.taz_id AND z.ts_hour=k.ts_hour "
+                               "SET z.load_kw_est=k.load_kw_est, z.power_coverage=k.power_coverage")
+        conn.commit()
+    print(f"[export_ads_parquet] ads_zone_occupancy_hour load_kw_est/power_coverage: computed={n} updated={changed} "
+          f"days={len(dates) - len(missing.get('ads_zone_occupancy_hour(load_kw)', []))} {time.time() - t0:.2f}s", flush=True)
 
 
 def main() -> None:
@@ -128,10 +223,14 @@ def main() -> None:
     p.add_argument("--start"); p.add_argument("--end")
     p.add_argument("--exclude", action="append", help="跳过的日期，可重复")
     p.add_argument("--dry-run", action="store_true", help="只读 Parquet 统计行数，不连 MySQL")
+    p.add_argument("--only", action="append", choices=["quality_summary", "dim_station", "load_kw"],
+                   help="只做这几项（可重复）；不给则全量导出")
     a = p.parse_args()
-    if not a.ds and not (a.start and a.end):
+    only = set(a.only or [])
+    need_dates = not only or "load_kw" in only
+    if need_dates and not a.ds and not (a.start and a.end):
         raise SystemExit("需要 --ds 或 --start/--end")
-    dates = dates_from(a)
+    dates = dates_from(a) if need_dates else []
     conn = None
     if not a.dry_run:
         import pymysql
@@ -139,8 +238,11 @@ def main() -> None:
                                user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
                                database=os.getenv("MYSQL_DB", os.getenv("MYSQL_DATABASE", "sz_ev")),
                                charset="utf8mb4", autocommit=False, init_command="SET time_zone='+08:00'")
+        ensure_schema(conn)
     missing = {}
-    for mt, (ht, cols, dexpr, rnd) in PART_TABLES.items():
+    if "load_kw" in only:
+        update_load_kw(conn, dates, missing)
+    for mt, (ht, cols, dexpr, rnd) in (PART_TABLES.items() if not only else []):
         t0, n = time.time(), 0
         cur = conn.cursor() if conn else None
         for i in range(0, len(dates), 31):
@@ -160,11 +262,13 @@ def main() -> None:
         if conn:
             conn.commit()
         print(f"[export_ads_parquet] {mt}: rows={n} days={len(dates) - len(missing.get(mt, []))} {time.time() - t0:.2f}s", flush=True)
-    for mt, rows, cols, mode in [
-        ("dim_station", station_rows(), ["station_id", "taz_id", "longitude", "latitude", "slow_count", "fast_count",
-                                         "total_piles", "rated_power_kw"], "REPLACE"),
-        ("ads_quality_summary", quality_rows(), ["metric", "value", "note"], "SNAPSHOT"),
+    for key, mt, rows_fn, cols, mode in [
+        ("dim_station", "dim_station", station_rows, DIM_COLS, "REPLACE"),
+        ("quality_summary", "ads_quality_summary", quality_rows, ["metric", "value", "note"], "SNAPSHOT"),
     ]:
+        if only and key not in only:
+            continue
+        rows = rows_fn()
         t0 = time.time()
         if conn:
             with conn.cursor() as cur:

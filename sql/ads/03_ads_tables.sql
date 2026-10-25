@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS ads_zone_occupancy_hour (
   taz_id VARCHAR(32) NOT NULL,
   ts_hour DATETIME NOT NULL,
   occupancy DECIMAL(8,6) NULL,
-  load_kw_est DECIMAL(12,2) NULL,
+  load_kw_est DECIMAL(12,2) NULL,      -- 占用率 × 片区内有功率数据站的额定功率之和；片区全无功率数据为 NULL
+  power_coverage DECIMAL(7,6) NULL,   -- 片区内有功率数据站的桩数 / 片区全部桩数
   PRIMARY KEY (taz_id, ts_hour)
 ) ENGINE=InnoDB;
 

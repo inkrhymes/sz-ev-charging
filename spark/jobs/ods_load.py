@@ -17,6 +17,22 @@ COLS = {"station_id": "string", "ts": "timestamp", "busy": "double", "idle": "do
         "s_price": "double", "e_price": "double", "duration": "double", "volume": "double"}
 
 
+# 功率相关列（小紫 etl/pile_power.py 写进 lake ods/station_info；UrbanEV 原表/旧 demo 没有则为 NULL）。放在 src 之后，旧表用 ALTER 追加。
+POWER_COLS = [("rated_power_kw_total", "DOUBLE"), ("dc_pile_cnt", "INT"), ("ac_pile_cnt", "INT"), ("pile_cnt_from_power", "INT")]
+
+
+def ensure_station_info_table(spark) -> None:
+    spark.sql("CREATE DATABASE IF NOT EXISTS ods")
+    spark.sql(f"""CREATE TABLE IF NOT EXISTS ods.station_info (
+        station_id STRING, taz_id STRING, longitude DOUBLE, latitude DOUBLE,
+        slow_count INT, fast_count INT, total_piles INT, rated_power_kw DOUBLE, src STRING,
+        {", ".join(f"{c} {t}" for c, t in POWER_COLS)}) STORED AS PARQUET""")
+    have = {f.name for f in spark.table("ods.station_info").schema.fields}
+    add = [f"{c} {t}" for c, t in POWER_COLS if c not in have]
+    if add:
+        spark.sql(f"ALTER TABLE ods.station_info ADD COLUMNS ({', '.join(add)})")
+
+
 def load_station_info(spark, explicit: str | None) -> str:
     """统一成 station_id/taz_id/longitude/latitude/slow_count/fast_count/total_piles/rated_power_kw。
 
@@ -49,8 +65,9 @@ def load_station_info(spark, explicit: str | None) -> str:
             CAST({pick('slow_count')} AS INT) slow_count,
             CAST({pick('fast_count')} AS INT) fast_count,
             CAST({pick('charge_count', 'total_piles')} AS INT) total_piles,
-            CAST({pick('rated_power_kw')} AS DOUBLE) rated_power_kw,
-            '{c.name}' src
+            CAST({pick('rated_power_kw', 'rated_power_kw_total')} AS DOUBLE) rated_power_kw,
+            '{c.name}' src,
+            {", ".join(f"CAST({pick(n)} AS {t}) {n}" for n, t in POWER_COLS)}
           FROM v_info_raw""")
         return path
     raise SystemExit("[ods] 找不到站点维表")
@@ -80,10 +97,7 @@ def main() -> None:
         s_price DOUBLE, e_price DOUBLE, duration DOUBLE, volume DOUBLE,
         src_path STRING, load_at TIMESTAMP)
       PARTITIONED BY (dt STRING) STORED AS PARQUET""")
-    spark.sql("""
-      CREATE TABLE IF NOT EXISTS ods.station_info (
-        station_id STRING, taz_id STRING, longitude DOUBLE, latitude DOUBLE,
-        slow_count INT, fast_count INT, total_piles INT, rated_power_kw DOUBLE, src STRING) STORED AS PARQUET""")
+    ensure_station_info_table(spark)
 
     t = time.time()
     src = load_station_info(spark, a.station_info)

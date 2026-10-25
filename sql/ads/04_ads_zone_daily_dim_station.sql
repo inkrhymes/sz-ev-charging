@@ -22,5 +22,9 @@ CREATE TABLE IF NOT EXISTS dim_station (
   fast_count INT NULL,
   total_piles INT NULL,
   rated_power_kw DECIMAL(10,2) NULL,
+  rated_power_kw_total DECIMAL(12,2) NULL,  -- 站内各桩额定功率之和（etl/pile_power.py）；130 站无数据为 NULL
+  dc_pile_cnt INT NULL,
+  ac_pile_cnt INT NULL,
+  pile_cnt_from_power INT NULL,
   KEY idx_dim_station_taz (taz_id)
 ) ENGINE=InnoDB;

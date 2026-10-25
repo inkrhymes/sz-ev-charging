@@ -2,7 +2,7 @@
 """ADS：由 DWD 计算指标 → Hive ads.*（dt 分区），再回写 MySQL ads_*（结构同 sql/ads/03_ads_tables.sql）。
 
 - ads.city_overview          ↔ ads_city_overview
-- ads.zone_occupancy_hour    ↔ ads_zone_occupancy_hour（load_kw_est = occupancy_avg × 片区额定功率之和）
+- ads.zone_occupancy_hour    ↔ ads_zone_occupancy_hour（load_kw_est = occupancy_avg × 片区内有功率数据站的 rated_power_kw_total 之和；power_coverage 见 ZONE_POWER_SQL）
 - ads.baseline_naive         ↔ ads_baseline_naive（lag1 跨天：读取前一日最后一小时）
 - ads.quality_summary        ↔ ads_quality_summary（对全部已有 dwd 分区汇总）
 回写：MySQL 端按日期范围先 DELETE 再 INSERT（同一事务），重跑幂等；--dry-run 时只导出 CSV。
@@ -43,13 +43,25 @@ def quality_station_path() -> str | None:
 EXPORT = Path(os.environ.get("SZ_ADS_EXPORT", ROOT / "data" / "lake" / "export" / "ads"))
 
 
+# 片区功率（与 export_ads_parquet.zone_power 同口径）：
+#   kw_sum = 片区内 rated_power_kw_total 非空的站的功率之和；片区内全无功率数据 → NULL（SUM 全 NULL 即 NULL）
+#   power_coverage = 有功率数据站的桩数(total_piles) / 片区全部桩数
+ZONE_POWER_SQL = """SELECT taz_id,
+    SUM(rated_power_kw_total) kw_sum,
+    SUM(CASE WHEN rated_power_kw_total IS NOT NULL THEN COALESCE(total_piles, 0) ELSE 0 END)
+      / NULLIF(SUM(COALESCE(total_piles, 0)), 0) power_coverage
+  FROM ods.station_info GROUP BY taz_id"""
+
+
 def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts: list[str] | None = None):
     spark.sql("CREATE DATABASE IF NOT EXISTS ads")
     spark.sql("""CREATE TABLE IF NOT EXISTS ads.city_overview (station_cnt BIGINT, zone_cnt BIGINT,
       avg_occupancy DOUBLE, peak_hour INT, stuck_cnt BIGINT, high_missing_cnt BIGINT)
       PARTITIONED BY (dt STRING) STORED AS PARQUET""")
     spark.sql("""CREATE TABLE IF NOT EXISTS ads.zone_occupancy_hour (taz_id STRING, ts_hour TIMESTAMP,
-      occupancy DOUBLE, load_kw_est DOUBLE) PARTITIONED BY (dt STRING) STORED AS PARQUET""")
+      occupancy DOUBLE, load_kw_est DOUBLE, power_coverage DOUBLE) PARTITIONED BY (dt STRING) STORED AS PARQUET""")
+    if "power_coverage" not in {f.name for f in spark.table("ads.zone_occupancy_hour").schema.fields}:
+        spark.sql("ALTER TABLE ads.zone_occupancy_hour ADD COLUMNS (power_coverage DOUBLE)")
     spark.sql("""CREATE TABLE IF NOT EXISTS ads.baseline_naive (taz_id STRING, ts_hour TIMESTAMP,
       y_true DOUBLE, y_hat_lag1 DOUBLE, abs_err DOUBLE) PARTITIONED BY (dt STRING) STORED AS PARQUET""")
     spark.sql("""CREATE TABLE IF NOT EXISTS ads.quality_summary (metric STRING, value DOUBLE, note STRING)
@@ -57,8 +69,8 @@ def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts
 
     t = time.time()
     spark.sql(f"""INSERT OVERWRITE TABLE ads.zone_occupancy_hour PARTITION (dt)
-      SELECT taz_id, ts_hour, occupancy_avg, occupancy_avg * rated_kw_sum, dt
-      FROM dwd.zone_hour WHERE dt IN ({dl})""")
+      SELECT z.taz_id, z.ts_hour, z.occupancy_avg, z.occupancy_avg * p.kw_sum, p.power_coverage, z.dt
+      FROM dwd.zone_hour z LEFT JOIN ({ZONE_POWER_SQL}) p ON z.taz_id = p.taz_id WHERE z.dt IN ({dl})""")
     perf.step("zone_occupancy_hour",
               spark.sql(f"SELECT COUNT(*) FROM ads.zone_occupancy_hour WHERE dt IN ({dl})").first()[0], t)
 
@@ -154,14 +166,15 @@ def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean", src_parts
 EXPORTS = {
     "ads_city_overview": ("SELECT CAST(dt AS DATE) dt, station_cnt, zone_cnt, ROUND(avg_occupancy,6) avg_occupancy, "
                           "peak_hour, stuck_cnt, high_missing_cnt FROM ads.city_overview WHERE dt IN ({dl})", "dt"),
-    "ads_zone_occupancy_hour": ("SELECT taz_id, ts_hour, ROUND(occupancy,6) occupancy, ROUND(load_kw_est,2) load_kw_est "
-                                "FROM ads.zone_occupancy_hour WHERE dt IN ({dl})", "DATE(ts_hour)"),
+    "ads_zone_occupancy_hour": ("SELECT taz_id, ts_hour, ROUND(occupancy,6) occupancy, ROUND(load_kw_est,2) load_kw_est, "
+                                "ROUND(power_coverage,6) power_coverage FROM ads.zone_occupancy_hour WHERE dt IN ({dl})", "DATE(ts_hour)"),
     "ads_baseline_naive": ("SELECT taz_id, ts_hour, ROUND(y_true,6) y_true, ROUND(y_hat_lag1,6) y_hat_lag1, "
                            "ROUND(abs_err,6) abs_err FROM ads.baseline_naive WHERE dt IN ({dl})", "DATE(ts_hour)"),
     "ads_zone_daily": ("SELECT CAST(dt AS DATE) dt, taz_id, ROUND(avg_occupancy,6) avg_occupancy, station_cnt, pile_cnt, "
                        "ROUND(center_lon,6) center_lon, ROUND(center_lat,6) center_lat FROM ads.zone_daily WHERE dt IN ({dl})", "dt"),
     "dim_station": ("SELECT station_id, taz_id, ROUND(longitude,6) longitude, ROUND(latitude,6) latitude, slow_count, "
-                    "fast_count, total_piles, rated_power_kw FROM ods.station_info", None),
+                    "fast_count, total_piles, rated_power_kw, ROUND(rated_power_kw_total,2) rated_power_kw_total, dc_pile_cnt, "
+                    "ac_pile_cnt, pile_cnt_from_power FROM ods.station_info", None),
     "ads_quality_summary": ("SELECT metric, ROUND(value,6) value, note FROM ads.quality_summary", None),
 }
 
