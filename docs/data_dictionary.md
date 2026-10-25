@@ -1,6 +1,6 @@
 # 字段字典（v0.1 草稿）
 
-对齐开题：**基于大数据技术的深圳市电动汽车充电站运行管理可视化系统设计与实现**  
+项目：**深圳市电动汽车充电站运行管理可视化系统**  
 主数据：UrbanEV 站点级 5 分钟原始（演示子集 20～30 站，含卡死/高缺失）；辅：片区天气（Open-Meteo）、节假日表。  
 负责人：小黑。命名约定：`ods_` 贴源、`dwd_` 清洗明细、`ads_` 指标宽表；时间统一 `Asia/Shanghai`。
 
@@ -71,7 +71,7 @@
 | ads_baseline_naive | taz_id, ts_hour, y_true, y_hat_lag1, abs_err | 上一时刻基线 stub | `/api/baseline` |
 | ads_ticket | ticket_id, station_id, type, status, created_at, updated_at | 待检修/巡检 stub | `/api/tickets` |
 
-## 4. 质检数字（开题可引用口径）
+## 4. 质检数字（对外引用口径）
 
 | 指标 | 全量参考 | 演示子集 14 天窗实测（`docs/quality_report.md`） |
 |------|----------|--------------------------------------------------|

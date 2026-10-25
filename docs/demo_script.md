@@ -4,7 +4,7 @@
 
 ## 开场（10s）
 1. 打开 `web/index.html`（或经 Flask 静态托管）。
-2. 说明题名：基于大数据技术的深圳充电站运行管理可视化；技术栈 Flask + MySQL + ECharts。
+2. 说明项目：深圳充电站运行管理可视化系统；技术栈 Flask + MySQL + ECharts。
 
 ## 主链路（50～70s）
 1. **KPI 条**：站数 / 片区 / 日均占用率 / 高峰小时 / 卡死站 / 高缺失站 —— 对应 `ads_city_overview` → `/api/overview`。
