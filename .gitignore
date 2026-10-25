@@ -33,3 +33,4 @@ data/mysql/
 
 # 备份产物（scripts/backup.sh 默认写到 /workspace/backups，仓库内路径也忽略）
 backups/
+perf/out/
