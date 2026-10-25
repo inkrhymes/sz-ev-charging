@@ -50,14 +50,16 @@ def main() -> None:
 
     t = time.time()
     spark.sql("CREATE DATABASE IF NOT EXISTS dwd")
-    spark.sql(f"""CREATE EXTERNAL TABLE IF NOT EXISTS dwd.ext_charge_5min_clean (
-        station_id INT, taz_id INT, ts TIMESTAMP, busy DOUBLE, idle DOUBLE, total_piles INT,
-        s_price DOUBLE, e_price DOUBLE, duration DOUBLE, volume DOUBLE,
-        is_row_missing TINYINT, is_stuck TINYINT, is_outlier TINYINT, occupancy DOUBLE, quality_flag STRING)
-      PARTITIONED BY (dt STRING) STORED AS PARQUET LOCATION '{dwd_root}'""")
+    # 用 Spark 数据源表（带 LOCATION 即为外表，登记在 Hive Metastore）：
+    # 上游 ts 是不带时区的 Parquet 时间戳，Hive SerDe 的 TIMESTAMP 会按 UTC 解释而偏移 8 小时，数据源表会推断为 TIMESTAMP_NTZ，不会偏移。
+    old = [r for r in spark.sql("SHOW TABLES IN dwd LIKE 'ext_charge_5min_clean'").collect()]
+    if old and spark.sql("DESCRIBE FORMATTED dwd.ext_charge_5min_clean").where("col_name='Provider' AND lower(data_type)='parquet'").count() == 0:
+        spark.sql("DROP TABLE dwd.ext_charge_5min_clean")  # 旧版 Hive SerDe 外表；EXTERNAL 删除不动数据
+    spark.sql(f"""CREATE TABLE IF NOT EXISTS dwd.ext_charge_5min_clean
+      USING parquet LOCATION '{dwd_root}'""")
     spark.sql("MSCK REPAIR TABLE dwd.ext_charge_5min_clean")  # 注册湖内全部已有分区
     spark.sql("""CREATE OR REPLACE TEMP VIEW v_src AS
-      SELECT CAST(station_id AS STRING) station_id, ts, busy, idle, total_piles, occupancy,
+      SELECT CAST(station_id AS STRING) station_id, CAST(ts AS TIMESTAMP) ts, busy, idle, total_piles, occupancy,
              s_price, e_price, duration, volume, is_row_missing, is_stuck, is_outlier, quality_flag, dt
       FROM dwd.ext_charge_5min_clean""")
     n = spark.sql(f"SELECT COUNT(*) FROM v_src WHERE dt IN ({dl})").first()[0]
@@ -71,7 +73,7 @@ def main() -> None:
     out = Path(a.ads_output)
     t = time.time()
     zh = spark.sql(f"""
-      SELECT z.taz_id, z.ts_hour, z.occupancy_avg, z.busy_sum, z.piles_sum, z.station_cnt,
+      SELECT z.taz_id, CAST(z.ts_hour AS TIMESTAMP_NTZ) ts_hour, z.occupancy_avg, z.busy_sum, z.piles_sum, z.station_cnt,
              c.lon AS center_lon, c.lat AS center_lat, z.dt
       FROM dwd.zone_hour z LEFT JOIN (SELECT taz_id, AVG(longitude) lon, AVG(latitude) lat
                                       FROM ods.station_info GROUP BY taz_id) c ON z.taz_id=c.taz_id
