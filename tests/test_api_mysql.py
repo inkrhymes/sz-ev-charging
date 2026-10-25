@@ -174,7 +174,7 @@ def test_map_hourly_file_and_bad_date(app_mod, monkeypatch):
 
 def test_realtime_zones(app_mod, monkeypatch):
     rows = [{"taz_id": "11", "window_start": dt.datetime(2022, 9, 1, 10, 0), "window_end": dt.datetime(2022, 9, 1, 10, 15),
-             "occupancy": Decimal("0.4"), "busy_sum": 12, "piles_sum": 30, "station_cnt": 2,
+             "occupancy": Decimal("0.4"), "busy_sum": 12, "piles_sum": 30, "station_cnt": 2, "outlier_cnt": 1, "dropped_src_cnt": 0,
              "write_ts": dt.datetime(2026, 10, 25, 14, 0, 0, 123000), "latency_ms": 1500}]
     monkeypatch.setattr(app_mod, "_sql", lambda q, a=(): rows if "rt_zone_occupancy" in q else fake_sql(q, a))
     c = app_mod.app.test_client()
@@ -182,6 +182,7 @@ def test_realtime_zones(app_mod, monkeypatch):
     d = data(r)
     assert d["source"] == "mysql" and d["zones"][0]["window_end"] == "2022-09-01 10:15:00"
     assert d["zones"][0]["occupancy"] == 0.4 and d["zones"][0]["write_ts"] == "2026-10-25 14:00:00"
+    assert d["zones"][0]["outlier_cnt"] == 1 and d["zones"][0]["dropped_src_cnt"] == 0
     assert r.headers.get("X-Data-Source") == "mysql"
     monkeypatch.setenv("API_SOURCE", "file")
     assert data(c.get("/api/realtime/zones"))["zones"] == []

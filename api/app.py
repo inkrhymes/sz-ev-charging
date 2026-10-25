@@ -378,13 +378,14 @@ def realtime_zones():
     if not use_mysql():
         return ok({"source": "none", "zones": []})
     r = _sql("SELECT t.taz_id, t.window_start, t.window_end, t.occupancy, t.busy_sum, t.piles_sum, t.station_cnt,"
-             " t.write_ts, t.latency_ms FROM rt_zone_occupancy t JOIN (SELECT taz_id, MAX(window_end) AS we"
+             " t.outlier_cnt, t.dropped_src_cnt, t.write_ts, t.latency_ms FROM rt_zone_occupancy t JOIN (SELECT taz_id, MAX(window_end) AS we"
              " FROM rt_zone_occupancy GROUP BY taz_id) m ON t.taz_id=m.taz_id AND t.window_end=m.we")
     if r is None:
         return ok({"source": "none", "zones": []})
     zones = sorted(({"taz_id": str(x["taz_id"]), "window_start": _ts(x["window_start"]), "window_end": _ts(x["window_end"]),
                      "occupancy": _num(x["occupancy"], 4), "busy_sum": x["busy_sum"], "piles_sum": x["piles_sum"],
-                     "station_cnt": x["station_cnt"], "write_ts": _ts(x["write_ts"])[:19], "latency_ms": x["latency_ms"]}
+                     "station_cnt": x["station_cnt"],
+                     "outlier_cnt": x.get("outlier_cnt"), "dropped_src_cnt": x.get("dropped_src_cnt"), "write_ts": _ts(x["write_ts"])[:19], "latency_ms": x["latency_ms"]}
                     for x in r), key=lambda z: int(z["taz_id"]) if z["taz_id"].isdigit() else 0)
     return ok({"source": "mysql", "zones": zones})
 

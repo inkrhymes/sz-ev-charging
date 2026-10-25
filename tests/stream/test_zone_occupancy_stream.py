@@ -25,12 +25,13 @@ def msg(st, taz, ts, busy, piles, flag="ok"):
 
 
 def test_file_mode_end_to_end(tmp_path, monkeypatch):
-    monkeypatch.setenv("SZ_RT_BAD_FLAGS", "bad")
+    monkeypatch.delenv("SZ_RT_BAD_FLAGS", raising=False)  # 默认 outlier,dropped_src
     inp = tmp_path / "in"; inp.mkdir()
     rows = [
         msg("s1", "11", "2022-09-01 10:00:00", 2, 10), msg("s2", "11", "2022-09-01 10:00:00", 4, 10),
         msg("s1", "11", "2022-09-01 10:05:00", 6, 10), msg("s3", "22", "2022-09-01 10:05:00", 1, 4),
-        msg("s2", "11", "2022-09-01 10:05:00", 9, 10, flag="BAD"),   # 坏数据，应丢弃
+        msg("s2", "11", "2022-09-01 10:05:00", 9, 10, flag="OUTLIER"),   # 坏数据：不计占用率，计入 outlier_cnt
+        msg("s1", "11", "2022-09-01 10:05:00", 1, 10, flag="dropped_src"),
         msg("s3", "22", "2022-09-01 10:10:00", 3, 0),                 # total_piles=0，应丢弃
     ]
     (inp / "part1.json").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
@@ -44,6 +45,7 @@ def test_file_mode_end_to_end(tmp_path, monkeypatch):
     w = got[("11", "2022-09-01 10:15:00")]          # 窗口 [10:00,10:15)：s1@10:00, s2@10:00, s1@10:05
     assert (int(w["busy_sum"]), int(w["piles_sum"]), int(w["station_cnt"]), int(w["msg_cnt"])) == (12, 30, 2, 3)
     assert abs(float(w["occupancy"]) - 0.4) < 1e-6
+    assert (int(w["outlier_cnt"]), int(w["dropped_src_cnt"])) == (1, 1)
     assert int(w["latency_ms"]) >= 0 and w["write_ts"]
     w = got[("11", "2022-09-01 10:05:00")]          # 窗口 [09:50,10:05)：只有 10:00 两条
     assert (int(w["busy_sum"]), int(w["piles_sum"])) == (6, 20)
@@ -59,8 +61,8 @@ def test_to_rows_latency():
     import datetime as dt
     now = dt.datetime(2026, 1, 1, 0, 0, 1)
     r = zs.to_rows([{"taz_id": 11, "window_start": None, "window_end": None, "occupancy": 0.5, "busy_sum": 1,
-                     "piles_sum": 2, "station_cnt": 1, "msg_cnt": 1, "ingest_ts_max": dt.datetime(2026, 1, 1)}], 7, now)
-    assert r[0][0] == "11" and r[0][10] == 1000 and r[0][11] == 7
+                     "piles_sum": 2, "station_cnt": 1, "msg_cnt": 1, "outlier_cnt": 2, "dropped_src_cnt": 0, "ingest_ts_max": dt.datetime(2026, 1, 1)}], 7, now)
+    assert r[0][0] == "11" and r[0][8] == 2 and r[0][12] == 1000 and r[0][13] == 7
 
 
 def test_bad_flags_configurable(monkeypatch):
@@ -68,3 +70,8 @@ def test_bad_flags_configurable(monkeypatch):
     assert zs.bad_flags() == []
     monkeypatch.setenv("SZ_RT_BAD_FLAGS", " Bad, X ")
     assert zs.bad_flags() == ["bad", "x"]
+
+
+def test_bad_flags_default(monkeypatch):
+    monkeypatch.delenv("SZ_RT_BAD_FLAGS", raising=False)
+    assert zs.bad_flags() == ["outlier", "dropped_src"]

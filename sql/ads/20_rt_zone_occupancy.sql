@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS rt_zone_occupancy (
   busy_sum      INT          NOT NULL,
   piles_sum     INT          NOT NULL,
   station_cnt   INT          NOT NULL COMMENT '窗口内去重站点数',
-  msg_cnt       INT          NOT NULL COMMENT '窗口内参与计算的消息条数',
+  msg_cnt       INT          NOT NULL COMMENT '窗口内参与计算的消息条数（不含坏消息）',
+  outlier_cnt   INT          NOT NULL DEFAULT 0 COMMENT 'quality_flag=outlier 被排除的条数',
+  dropped_src_cnt INT        NOT NULL DEFAULT 0 COMMENT 'quality_flag=dropped_src 被排除的条数',
   ingest_ts_max DATETIME(3)  NULL     COMMENT '窗口内最晚一条消息进入 Spark 的时间',
   write_ts      DATETIME(3)  NOT NULL COMMENT '本行写入 MySQL 的时间',
   latency_ms    INT          NULL     COMMENT 'write_ts - ingest_ts_max，毫秒',
@@ -15,3 +17,7 @@ CREATE TABLE IF NOT EXISTS rt_zone_occupancy (
   PRIMARY KEY (taz_id, window_end),
   KEY idx_rt_window_end (window_end)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 已建表的升级（2026-10-25 加坏数据计数）：
+-- ALTER TABLE rt_zone_occupancy ADD COLUMN outlier_cnt INT NOT NULL DEFAULT 0 AFTER msg_cnt,
+--   ADD COLUMN dropped_src_cnt INT NOT NULL DEFAULT 0 AFTER outlier_cnt;

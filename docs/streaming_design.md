@@ -23,8 +23,11 @@
 | occupancy | double | 站级占用率（流计算不用它，片区占用率按 busy/total_piles 重新加总） |
 | quality_flag | string | 质量标记 |
 
-过滤规则：`quality_flag` 属于环境变量 `SZ_RT_BAD_FLAGS` 里的值（逗号分隔、不分大小写，默认 `bad,invalid,error,1`）就丢掉；
-设成空字符串则不过滤。另外 `total_piles<=0`、`busy` 为空、`ts` 解析不出来的消息也丢掉。
+`quality_flag` 实际取值：`ok`、`outlier`（数值异常）、`dropped_src`（源头断传补的点）。
+过滤规则：`quality_flag` 属于环境变量 `SZ_RT_BAD_FLAGS` 里的值（逗号分隔、不分大小写，默认 `outlier,dropped_src`）就算坏消息，
+不参与占用率、busy_sum、piles_sum、station_cnt、msg_cnt，但会按标记分别计数到 `outlier_cnt`、`dropped_src_cnt`，
+页面能看出某个片区"这 15 分钟有几条数据被排除"。设成空字符串则全部参与计算。
+另外 `total_piles<=0`、`busy` 为空、`ts` 解析不出来的消息直接丢掉，不计数。窗口里全是坏消息时 occupancy 为空。
 
 ## 2. 窗口和 watermark
 
@@ -51,7 +54,8 @@ DDL：`sql/ads/20_rt_zone_occupancy.sql`。除了上面的指标，每行还记�
 - `ingest_ts_max`：窗口里最晚一条消息进入 Spark 的时间；
 - `write_ts`：这一行写进 MySQL 的时间；
 - `latency_ms = write_ts - ingest_ts_max`，即从进入流计算到落库的耗时；
-- `batch_id`：哪个 micro-batch 写的。
+- `batch_id`：哪个 micro-batch 写的；
+- `outlier_cnt` / `dropped_src_cnt`：被排除的坏消息条数（`/api/realtime/zones` 也返回这两个字段）。
 
 本机 file 模式实测一批延迟约 2 秒（Kafka 模式还要加上 trigger 间隔，默认 30 秒）。
 

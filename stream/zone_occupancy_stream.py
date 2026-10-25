@@ -8,8 +8,9 @@
 输出：foreachBatch 按 (taz_id, window_end) upsert 到 MySQL rt_zone_occupancy（--sink mysql），
       或写 CSV 到 --out 目录（--sink csv，测试用），或打印（--sink console）。
 
-坏数据过滤：quality_flag 属于 SZ_RT_BAD_FLAGS（逗号分隔，默认 "bad,invalid,error,1"，大小写不敏感）的消息丢弃；
-设为空字符串则不过滤。total_piles<=0 或 busy 为空的消息也丢弃。
+坏数据过滤：quality_flag 属于 SZ_RT_BAD_FLAGS（逗号分隔，默认 "outlier,dropped_src"，大小写不敏感）的消息丢弃；
+设为空字符串则不过滤。坏消息不参与占用率，但按标记计数到 outlier_cnt / dropped_src_cnt。
+total_piles<=0 或 busy 为空的消息直接丢弃（不计数）。
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ KAFKA_PKG = "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3"
 
 
 def bad_flags() -> list[str]:
-    raw = os.getenv("SZ_RT_BAD_FLAGS", "bad,invalid,error,1")
+    raw = os.getenv("SZ_RT_BAD_FLAGS", "outlier,dropped_src")
     return [x.strip().lower() for x in raw.split(",") if x.strip()]
 
 
@@ -81,24 +82,33 @@ def transform(df, watermark="10 minutes", window="15 minutes", slide="5 minutes"
     cond = (F.col("event_ts").isNotNull() & F.col("taz_id").isNotNull() & F.col("busy").isNotNull()
             & (F.col("total_piles") > 0))
     flags = bad_flags()
-    if flags:
-        cond = cond & (F.col("quality_flag").isNull() | ~F.lower(F.trim(F.col("quality_flag"))).isin(flags))
+    flag = F.lower(F.trim(F.col("quality_flag")))
+    good = F.lit(True) if not flags else (F.col("quality_flag").isNull() | ~flag.isin(flags))
+    df = df.where(cond).withColumn("_good", good).withColumn("_flag", flag)
     w = F.window("event_ts", window, slide)
-    agg = (df.where(cond).withWatermark("event_ts", watermark)
+    g = F.col("_good")
+    agg = (df.withWatermark("event_ts", watermark)
            .groupBy(F.col("taz_id"), w)
-           .agg(F.sum("busy").alias("busy_sum"), F.sum("total_piles").alias("piles_sum"),
-                F.approx_count_distinct("station_id").alias("station_cnt"),
-                F.count(F.lit(1)).alias("msg_cnt"), F.max("ingest_ts").alias("ingest_ts_max")))
+           .agg(F.sum(F.when(g, F.col("busy")).otherwise(0)).alias("busy_sum"),
+                F.sum(F.when(g, F.col("total_piles")).otherwise(0)).alias("piles_sum"),
+                F.approx_count_distinct(F.when(g, F.col("station_id"))).alias("station_cnt"),
+                F.sum(F.when(g, 1).otherwise(0)).alias("msg_cnt"),
+                F.sum(F.when(~g & (F.col("_flag") == "outlier"), 1).otherwise(0)).alias("outlier_cnt"),
+                F.sum(F.when(~g & (F.col("_flag") == "dropped_src"), 1).otherwise(0)).alias("dropped_src_cnt"),
+                F.max("ingest_ts").alias("ingest_ts_max")))
+    occ = F.when(F.col("piles_sum") > 0, F.col("busy_sum") / F.col("piles_sum"))
     return agg.select("taz_id", F.col("window.start").alias("window_start"), F.col("window.end").alias("window_end"),
-                      (F.col("busy_sum") / F.col("piles_sum")).alias("occupancy"),
-                      "busy_sum", "piles_sum", "station_cnt", "msg_cnt", "ingest_ts_max")
+                      occ.alias("occupancy"), "busy_sum", "piles_sum", "station_cnt", "msg_cnt",
+                      "outlier_cnt", "dropped_src_cnt", "ingest_ts_max")
 
 
 UPSERT_SQL = (
     "INSERT INTO rt_zone_occupancy (taz_id, window_start, window_end, occupancy, busy_sum, piles_sum, station_cnt,"
-    " msg_cnt, ingest_ts_max, write_ts, latency_ms, batch_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) AS new"
+    " msg_cnt, outlier_cnt, dropped_src_cnt, ingest_ts_max, write_ts, latency_ms, batch_id)"
+    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) AS new"
     " ON DUPLICATE KEY UPDATE window_start=new.window_start, occupancy=new.occupancy, busy_sum=new.busy_sum,"
-    " piles_sum=new.piles_sum, station_cnt=new.station_cnt, msg_cnt=new.msg_cnt, ingest_ts_max=new.ingest_ts_max,"
+    " piles_sum=new.piles_sum, station_cnt=new.station_cnt, msg_cnt=new.msg_cnt, outlier_cnt=new.outlier_cnt,"
+    " dropped_src_cnt=new.dropped_src_cnt, ingest_ts_max=new.ingest_ts_max,"
     " write_ts=new.write_ts, latency_ms=new.latency_ms, batch_id=new.batch_id")
 
 
@@ -109,7 +119,8 @@ def to_rows(pdf_records, batch_id: int, now):
         lat = int((now - ing).total_seconds() * 1000) if ing is not None else None
         occ = None if r["occupancy"] is None else round(float(r["occupancy"]), 6)
         rows.append((str(r["taz_id"]), r["window_start"], r["window_end"], occ, int(r["busy_sum"]), int(r["piles_sum"]),
-                     int(r["station_cnt"]), int(r["msg_cnt"]), ing, now, lat, int(batch_id)))
+                     int(r["station_cnt"]), int(r["msg_cnt"]), int(r.get("outlier_cnt") or 0),
+                     int(r.get("dropped_src_cnt") or 0), ing, now, lat, int(batch_id)))
     return rows
 
 
@@ -146,7 +157,7 @@ def csv_writer(out_dir: str):
         with open(os.path.join(out_dir, f"batch_{batch_id:06d}.csv"), "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["taz_id", "window_start", "window_end", "occupancy", "busy_sum", "piles_sum", "station_cnt",
-                        "msg_cnt", "ingest_ts_max", "write_ts", "latency_ms", "batch_id"])
+                        "msg_cnt", "outlier_cnt", "dropped_src_cnt", "ingest_ts_max", "write_ts", "latency_ms", "batch_id"])
             w.writerows(rows)
     return _w
 
