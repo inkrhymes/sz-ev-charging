@@ -1,6 +1,9 @@
 """Flask 薄 API：对齐 docs/api_contract.md（小粉）。
 默认读 data/demo/dwd CSV（小紫 ETL）；无文件时回落 MOCK。
 环境：MOCK=1 强制假数据；REPO_ROOT 可改仓库根。
+API_SOURCE=mysql 时 overview / zones / zone/series / baseline / quality 改读 MySQL（sz_ev 的 ads_* 表，
+连接用 MYSQL_HOST/MYSQL_PORT/MYSQL_USER/MYSQL_PASSWORD/MYSQL_DATABASE）；返回字段不变，库里无数据或连不上时退回文件模式。
+地图接口由 MAP_DB=mysql 单独控制（见 _map_db）。
 """
 from __future__ import annotations
 
@@ -66,6 +69,113 @@ def use_file() -> bool:
     return (not FORCE_MOCK) and _has_dwd()
 
 
+# ---- MySQL 数据源（API_SOURCE=mysql 启用；默认仍为文件模式）----
+def use_mysql() -> bool:
+    return (not FORCE_MOCK) and os.getenv("API_SOURCE", "file").lower() == "mysql"
+
+
+def _sql(query: str, args=()) -> list[dict] | None:
+    """执行只读查询；连不上或出错返回 None，调用方据此退回文件模式。"""
+    try:
+        import pymysql
+        conn = pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
+                               user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
+                               database=os.getenv("MYSQL_DATABASE", os.getenv("MYSQL_DB", "sz_ev")), charset="utf8mb4",
+                               cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, args)
+            return list(cur.fetchall())
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def _num(v, nd=None):
+    if v is None:
+        return None
+    v = float(v)
+    return round(v, nd) if nd is not None else v
+
+
+def _ts(v) -> str:
+    return v.strftime("%Y-%m-%d %H:%M:%S") if hasattr(v, "strftime") else str(v)
+
+
+def _range_args(default_limit: int):
+    """from/to（含端点）→ SQL 条件；未传 to 时限制条数，与文件模式一致。"""
+    f, t = request.args.get("from"), request.args.get("to")
+    cond, args = "", []
+    if f:
+        cond += " AND ts_hour >= %s"; args.append(f)
+    if t:
+        cond += " AND ts_hour < DATE_ADD(%s, INTERVAL 1 DAY)"; args.append(t)
+    limit = "" if t else f" LIMIT {int(default_limit)}"
+    return cond, args, limit
+
+
+def _first_taz(table: str):
+    r = _sql(f"SELECT taz_id FROM {table} ORDER BY CAST(taz_id AS UNSIGNED), taz_id LIMIT 1")
+    return r[0]["taz_id"] if r else None
+
+
+def _mysql_overview(dt: str):
+    r = _sql("SELECT dt, station_cnt, zone_cnt, avg_occupancy, peak_hour, stuck_cnt, high_missing_cnt "
+             "FROM ads_city_overview WHERE dt=%s", (dt[:10],))
+    if not r:
+        return None
+    r = r[0]
+    return {"dt": str(r["dt"])[:10], "station_cnt": r["station_cnt"], "zone_cnt": r["zone_cnt"],
+            "avg_occupancy": _num(r["avg_occupancy"], 4), "peak_hour": r["peak_hour"],
+            "stuck_cnt": r["stuck_cnt"], "high_missing_cnt": r["high_missing_cnt"]}
+
+
+def _mysql_zones():
+    r = _sql("SELECT DISTINCT taz_id FROM ads_zone_occupancy_hour")
+    if not r:
+        return None
+    return sorted({str(x["taz_id"]) for x in r}, key=lambda x: int(x) if x.isdigit() else 0)
+
+
+def _mysql_series(taz_id):
+    taz_id = taz_id or _first_taz("ads_zone_occupancy_hour")
+    if taz_id is None:
+        return None
+    cond, args, limit = _range_args(168)
+    r = _sql("SELECT taz_id, ts_hour, occupancy, load_kw_est FROM ads_zone_occupancy_hour "
+             f"WHERE taz_id=%s{cond} ORDER BY ts_hour{limit}", (taz_id, *args))
+    if r is None:
+        return None
+    return {"taz_id": taz_id, "points": [
+        {"taz_id": str(x["taz_id"]), "ts_hour": _ts(x["ts_hour"]), "occupancy": _num(x["occupancy"], 6),
+         "load_kw_est": _num(x["load_kw_est"], 2)} for x in r]}
+
+
+def _mysql_baseline(taz_id):
+    taz_id = taz_id or _first_taz("ads_baseline_naive")
+    if taz_id is None:
+        return None
+    cond, args, limit = _range_args(48)
+    r = _sql("SELECT taz_id, ts_hour, y_true, y_hat_lag1, abs_err FROM ads_baseline_naive "
+             f"WHERE taz_id=%s{cond} ORDER BY ts_hour{limit}", (taz_id, *args))
+    if r is None:
+        return None
+    return {"taz_id": taz_id, "points": [
+        {"taz_id": str(x["taz_id"]), "ts_hour": _ts(x["ts_hour"]), "y_true": _num(x["y_true"], 6),
+         "y_hat_lag1": _num(x["y_hat_lag1"], 6), "abs_err": _num(x["abs_err"], 6)} for x in r]}
+
+
+def _mysql_quality():
+    r = _sql("SELECT metric, value, note FROM ads_quality_summary ORDER BY metric")
+    if not r:
+        return None
+    return [{"metric": x["metric"], "value": _num(x["value"], 4), "note": x["note"]} for x in r]
+
+
+
 @lru_cache(maxsize=1)
 def _quality_rows():
     path = DWD / "dwd_quality_station.csv"
@@ -121,7 +231,7 @@ def health():
     return ok(
         {
             "service": "sz-ev-api",
-            "mode": "file" if use_file() else "mock",
+            "mode": "mysql" if use_mysql() else ("file" if use_file() else "mock"),
             "dwd": str(DWD),
         }
     )
@@ -130,6 +240,8 @@ def health():
 @app.get("/api/overview")
 def overview():
     dt = request.args.get("dt") or "2022-09-01"
+    if use_mysql() and (r := _mysql_overview(dt)) is not None:
+        return ok(r)
     if use_file():
         q = _quality_rows()
         z = _zone_rows()
@@ -181,6 +293,8 @@ def overview():
 
 @app.get("/api/zones")
 def zones_list():
+    if use_mysql() and (r := _mysql_zones()) is not None:
+        return ok(r)
     if use_file():
         ids = sorted({r["taz_id"] for r in _zone_rows()}, key=lambda x: int(x) if str(x).isdigit() else 0)
     else:
@@ -191,6 +305,8 @@ def zones_list():
 @app.get("/api/zone/series")
 def zone_series():
     taz_id = request.args.get("taz_id")
+    if use_mysql() and (r := _mysql_series(taz_id)) is not None:
+        return ok(r)
     if use_file():
         rows = _zone_rows()
         if not taz_id:
@@ -230,6 +346,8 @@ def zone_series():
 
 @app.get("/api/quality")
 def quality():
+    if use_mysql() and (r := _mysql_quality()) is not None:
+        return ok(r)
     if use_file():
         q = _quality_rows()
         stuck = sum(1 for r in q if r.get("stuck_flag") in {"1", "1.0", 1})
@@ -329,6 +447,8 @@ def _forecast_window():
 @app.get("/api/baseline")
 def baseline():
     taz_id = request.args.get("taz_id")
+    if use_mysql() and (r := _mysql_baseline(taz_id)) is not None:
+        return ok(r)
     if use_file():
         rows = _zone_rows()
         if not taz_id:
@@ -507,8 +627,6 @@ def stations():
     return ok({"total": total, "page": page, "page_size": size, "items": items})
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
 
 
 # ---- 片区地图 / 告警（小黄，前端第 6、7 页）----
@@ -780,3 +898,8 @@ def alerts_patch(alert_id):
         return err("status must be open|ack|closed")
     a = alerts_write(alert_id, status, body.get("note"))
     return ok(a) if a else err("alert not found", 404)
+
+
+# 必须放在文件末尾：python app.py 时 app.run() 会阻塞，写在它后面的路由（地图、告警）不会注册。
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
