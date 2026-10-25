@@ -67,3 +67,27 @@ def test_cli_exit_code(tmp_path):
     assert engine.main(["--layer", "ods", "--ds", "2022-09-01", "--path", str(p), "--no-db"]) == 2
     df.to_parquet(p)
     assert engine.main(["--layer", "ods", "--ds", "2022-09-01", "--path", str(p), "--no-db"]) == 0
+
+
+def test_station_went_empty_excludes_never_reporting(tmp_path, monkeypatch):
+    import pandas as pd
+    from quality import engine
+    q = tmp_path / "dwd" / "quality_station"
+    q.mkdir(parents=True)
+    pd.DataFrame({"station_id": [1, 2, 3], "missing_rate": [0.0, 0.1, 1.0]}).to_parquet(q / "p.parquet")
+    monkeypatch.setenv("SZ_EV_LAKE", str(tmp_path))
+    nan = float("nan")
+    prev = pd.DataFrame({"station_id": [1, 2, 3], "busy": [1, 1, nan], "idle": [1, 1, nan]})
+    cur = pd.DataFrame({"station_id": [1, 2, 3], "busy": [nan, 1, nan], "idle": [nan, 1, nan]})
+    rule = {"name": "e", "type": "station_went_empty", "max_groups": 0, "severity": "block"}
+    r = engine.chk_station_went_empty(cur, rule, prev_df=prev)
+    assert r.actual == "1" and not r.passed
+    assert engine.chk_station_went_empty(cur, rule, prev_df=None).passed
+
+
+def test_flag_groups_counts_stations():
+    import pandas as pd
+    from quality import engine
+    df = pd.DataFrame({"station_id": [1, 1, 2, 3], "is_stuck": [0, 1, 1, 0]})
+    r = engine.chk_flag_groups(df, {"name": "s", "type": "flag_groups", "column": "is_stuck", "max_groups": 1, "severity": "warn"})
+    assert r.actual == "2" and not r.passed

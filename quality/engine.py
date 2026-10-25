@@ -133,6 +133,42 @@ def chk_stuck_value(df, rule, **_):
               f"<={rule.get('max_groups', 0)}", f"连续{n_slots}个时段读数不变的{key}数")
 
 
+def _never_reporting(rule) -> set:
+    """全量体检里整段无数据（missing_rate>=1）的站：排除名单，来自 lake 的 dwd/quality_station。"""
+    lake = Path(os.getenv("SZ_EV_LAKE", ROOT / "data" / "lake"))
+    qdir = lake / rule.get("exclude_from", "dwd/quality_station")
+    full = qdir / rule.get("exclude_run", "run=2022-09-01_2023-02-28")
+    src = full if full.exists() else qdir
+    q = read_frame(src) if src.exists() else pd.DataFrame()
+    if q.empty or "missing_rate" not in q.columns:
+        return set()
+    return set(q.loc[q["missing_rate"] >= 1, "station_id"])
+
+
+def chk_station_went_empty(df, rule, prev_df=None, **_):
+    """前一天有数据、当天整天全空的站数（排除整段无数据的站）。无前一天时跳过。"""
+    key, cols = rule.get("group_by", "station_id"), rule.get("columns", ["busy", "idle"])
+    if prev_df is None or prev_df.empty or df.empty:
+        return _r(rule, True, 0, "无前一天，跳过", "skip")
+    never = _never_reporting(rule)
+    emp = df[cols].isna().all(axis=1).groupby(df[key]).all()
+    had = ~prev_df[cols].isna().all(axis=1).groupby(prev_df[key]).all()
+    went = (set(emp[emp].index) | (set(had[had].index) - set(df[key]))) & set(had[had].index)
+    went -= never
+    n, mx = len(went), rule.get("max_groups", 0)
+    return _r(rule, n <= mx, n, f"<={mx}", f"前一天有数、当天全空的{key}数（已排除 {len(never)} 个整段无数据站）")
+
+
+def chk_flag_groups(df, rule, **_):
+    """按分组统计 flag 列为真的组数（如小紫按天算出的 is_stuck）。"""
+    key, col = rule.get("group_by", "station_id"), rule["column"]
+    if col not in df.columns:
+        return _r(rule, True, 0, "列不存在，跳过", "skip")
+    n = int(df[col].astype(bool).groupby(df[key]).any().sum())
+    mx = rule.get("max_groups", 0)
+    return _r(rule, n <= mx, n, f"<={mx}", f"{col} 为真的{key}数")
+
+
 def chk_duplicate_key(df, rule, **_):
     n = int(df.duplicated(subset=rule["keys"]).sum())
     return _r(rule, n == 0, n, "0")
@@ -153,6 +189,8 @@ CHECKS = {
     "row_count_min": chk_row_count_min,
     "row_count_delta": chk_row_count_delta,
     "stuck_value": chk_stuck_value,
+    "station_went_empty": chk_station_went_empty,
+    "flag_groups": chk_flag_groups,
     "duplicate_key": chk_duplicate_key,
     "freshness": chk_freshness,
 }
