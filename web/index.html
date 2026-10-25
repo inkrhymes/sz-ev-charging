@@ -209,7 +209,8 @@
     </ul>
     <div class="group">数据治理</div>
     <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li>
-      <li data-route="runs"><svg class="ic"><use href="#i-trend"/></svg><span>调度运行</span></li></ul>
+      <li data-route="runs"><svg class="ic"><use href="#i-trend"/></svg><span>调度运行</span></li>
+      <li data-route="lineage"><svg class="ic"><use href="#i-trend"/></svg><span>数据血缘</span></li></ul>
     <div class="group">运维管理</div>
     <ul class="nav"><li data-route="alerts"><svg class="ic"><use href="#i-shield"/></svg><span>异常告警</span></li>
       <li data-route="tickets"><svg class="ic"><use href="#i-tool"/></svg><span>运维工单</span></li></ul>
@@ -284,6 +285,18 @@
         <div class="card-body">
           <table><thead><tr><th>数据日期</th><th>开始时间</th><th>用时</th><th>结果</th><th>各步骤</th></tr></thead><tbody id="runsBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody></table><div class="pager" id="runsPager"></div>
         </div></div>
+    </section>
+    <section class="view" id="view-lineage">
+      <div class="card filter">
+        <div class="f">找表<input id="lnSearch" list="lnList" placeholder="输入表名、目录或接口" style="width:260px" /><datalist id="lnList"></datalist></div>
+        <div class="ops"><button class="btn" id="lnReset">看全部</button><button class="btn primary" id="lnFind">定位</button></div>
+      </div>
+      <div class="grid">
+        <div class="card col-24"><div class="card-head"><div class="card-title">数据从哪来、被谁用<span class="tip" data-tip="从左到右是数据流动的方向。点一个节点，会把它的全部上游和下游标亮"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="lnExtra"></div></div>
+          <div class="card-body"><div id="lnState" class="empty" style="display:none"></div><div id="chartLineage" style="height:640px"></div></div></div>
+        <div class="card col-24" id="lnPanel" style="display:none"><div class="card-head"><div class="card-title" id="lnPanelTitle">节点详情</div></div>
+          <div class="card-body" id="lnPanelBody"></div></div>
+      </div>
     </section>
     <section class="view" id="view-realtime">
       <div class="grid kpis6" id="rtSum"></div>
@@ -445,6 +458,7 @@
       overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
       zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
       baseline: ["运行监控", "和上小时比", "实际占用和上一小时参考值差多少"],
+      lineage: ["数据治理", "数据血缘", "每张表的数据从哪来、又被哪些表和接口用到"],
       realtime: ["运行监控", "实时占用", "每 15 分钟更新一次各片区的占用情况，页面每 5 秒自动刷新"],
       site: ["运行监控", "选址补桩", "哪些片区桩不够用、建议加几根，哪些先观察"],
       map: ["运行监控", "片区地图", "在地图上看哪片最忙，点一下看片区里的站"],
@@ -471,7 +485,7 @@
     });
     const $ = id => document.getElementById(id);
     const charts = {};
-    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite", "chartFcDaily", "chartRt"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
+    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite", "chartFcDaily", "chartRt", "chartLineage"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
     const resizeAll = () => Object.values(charts).forEach(c => c.resize());
     const pct = v => (v * 100).toFixed(0) + "%";
     const tsLabel = ts => ts.slice(5, 16);   // MM-DD HH:mm
@@ -1302,6 +1316,104 @@
     }
     let rtRows = [];
     function rtStart() { if (rtTimer) return; loadRealtime(); rtTimer = setInterval(() => { if (!document.hidden) loadRealtime(); }, RT_EVERY); }
+    /* ---------- 数据血缘 ---------- */
+    const LN_COLS = [["raw", "原始文件"], ["lake", "数据湖"], ["hive", "Hive 表"], ["stream", "消息流和文件"], ["mysql", "业务库"], ["api", "接口"]];
+    const LN_COL_OF = { raw: 0, lake: 1, hive: 2, stream: 3, file: 3, mysql: 4, api: 5 };
+    const LN_KIND = { raw: "原始文件", lake: "数据湖目录", hive: "Hive 表", stream: "消息流", file: "文件", mysql: "业务库表", api: "接口" };
+    const LN_LAYER = { raw: "原始数据", ods: "原始入库", dwd: "清洗后", ads: "汇总结果", dq: "数据检查", ops: "调度记录", rt: "实时", stream: "消息流", file: "文件", api: "接口" };
+    const LN_COLOR = ["#86909c", "#14c9c9", "#722ed1", "#ff7d00", "#165dff", "#00b42a"];
+    let lnAll = null, lnSel = null, lnHi = null, lnHiEdges = null;
+    const lnName = id => { const n = lnAll && lnAll.nodes.find(x => x.id === id); return n ? n.label : id; };
+    function lnState(msg, retry) {
+      const st = $("lnState");
+      if (!msg) { st.style.display = "none"; $("chartLineage").style.visibility = ""; return; }
+      st.style.display = ""; $("chartLineage").style.visibility = "hidden";
+      st.innerHTML = escHtml(msg) + (retry ? ' <button class="btn" id="lnRetry">重新加载</button>' : "");
+      if (retry) $("lnRetry").onclick = () => { lnAll = null; loadLineage(); };
+    }
+    async function loadLineage() {
+      if (lnAll) return lnDraw();
+      lnState("加载中…");
+      let d;
+      try { d = await apiGet("/api/lineage"); } catch (e) { lnState("血缘数据暂时取不到，请稍后再试。", true); $("lnExtra").textContent = ""; return; }
+      if (!d || !(d.nodes || []).length) { lnState("还没有血缘数据。"); $("lnExtra").textContent = ""; return; }
+      lnAll = { nodes: d.nodes, edges: d.edges || [] };
+      $("lnList").innerHTML = lnAll.nodes.map(n => `<option value="${escHtml(n.label)}"></option>`).join("");
+      lnState(""); lnDraw();
+    }
+    function lnDraw() {
+      const cols = LN_COLS.map(() => []);
+      lnAll.nodes.forEach(n => cols[LN_COL_OF[n.kind] ?? 3].push(n));
+      const order = ["raw", "ods", "dwd", "ads", "dq", "ops", "rt", "stream", "file", "api"];
+      cols.forEach(c => c.sort((a, b) => (order.indexOf(a.layer) - order.indexOf(b.layer)) || a.label.localeCompare(b.label)));
+      const rows = Math.max(...cols.map(c => c.length)), rowH = 26, top = 46;
+      const h = top + rows * rowH + 20;
+      $("chartLineage").style.height = h + "px"; charts.chartLineage.resize();
+      const W = $("chartLineage").clientWidth || 1000, colW = W / LN_COLS.length;
+      const maxW = colW - 30, cw = ch => /[\u2e80-\uffff]/.test(ch) ? 11.5 : 6.6;
+      const fit = t => { let w = 0, i = 0; for (; i < t.length; i++) { w += cw(t[i]); if (w > maxW) break; } if (i >= t.length) return t; let o = t.slice(0, i); while (o && [...o].reduce((a, c) => a + cw(c), 0) + 11 > maxW) o = o.slice(0, -1); return o + "…"; };
+      const pos = {};
+      const data = [];
+      cols.forEach((c, ci) => c.forEach((n, ri) => {
+        const y = top + (rows - c.length) * rowH / 2 + ri * rowH + rowH / 2;
+        pos[n.id] = [colW * ci + 10, y];
+        const on = !lnHi || lnHi.has(n.id), me = n.id === lnSel;
+        const txt = fit(n.label);
+        data.push({ id: n.id, name: n.id, x: colW * ci + 14, y, symbolSize: me ? 14 : 9,
+          itemStyle: { color: LN_COLOR[ci], opacity: on ? 1 : 0.15, borderColor: me ? "#1d2129" : "#fff", borderWidth: me ? 2 : 1 },
+          label: { show: true, position: "right", formatter: txt, fontSize: 11, color: on ? "#1d2129" : "#c9cdd4", fontWeight: me ? "bold" : "normal" }, _n: n });
+      }));
+      const links = lnAll.edges.map(e => {
+        const on = !lnHiEdges || lnHiEdges.has(e.source + "|" + e.target);
+        return { source: e.source, target: e.target, lineStyle: { color: on && lnHi ? "#165dff" : "#a9aeb8", opacity: on ? (lnHi ? 0.85 : 0.35) : 0.05, width: on && lnHi ? 1.6 : 1, curveness: 0.15 } };
+      });
+      const graphic = LN_COLS.map(([, t], i) => ({ type: "text", left: colW * i + 10, top: 10, style: { text: t, fill: LN_COLOR[i], font: "bold 13px sans-serif" } }));
+      charts.chartLineage.setOption({
+        tooltip: { formatter: p => p.dataType === "node" ? `${escHtml(p.data._n.label)}<br/>${LN_KIND[p.data._n.kind] || ""} · ${LN_LAYER[p.data._n.layer] || ""}` : `${escHtml(lnName(p.data.source))} → ${escHtml(lnName(p.data.target))}` },
+        graphic,
+        series: [{ type: "graph", layout: "none", data, links, edgeSymbol: ["none", "arrow"], edgeSymbolSize: 5, roam: false, animation: false,
+          emphasis: { disabled: true }, left: 14, right: W - (colW * (LN_COLS.length - 1) + 14), top: Math.min(...data.map(x => x.y)), bottom: h - Math.max(...data.map(x => x.y)) }]
+      }, true);
+      $("lnExtra").textContent = lnHi ? `已标亮 ${lnHi.size} 个节点、${lnHiEdges.n} 条连线` : `共 ${lnAll.nodes.length} 个节点、${lnAll.edges.length} 条连线，点节点看上下游`;
+    }
+    async function lnPick(id) {
+      lnSel = id;
+      let d;
+      try { d = await apiGet("/api/lineage?node=" + encodeURIComponent(id) + "&direction=both"); }
+      catch (e) { toast("这个节点的上下游取不到，请稍后再试"); return; }
+      lnHi = new Set((d.nodes || []).map(n => n.id)); lnHi.add(id);
+      lnHiEdges = new Set((d.edges || []).map(e => e.source + "|" + e.target));
+      lnHiEdges.n = (d.edges || []).length;
+      lnDraw(); lnPanel(id, d.edges || []);
+    }
+    function lnPanel(id, edges) {
+      const n = lnAll.nodes.find(x => x.id === id) || { label: id, kind: "", layer: "" };
+      const up = edges.filter(e => e.target === id), down = edges.filter(e => e.source === id);
+      const walk = (from, to) => { const seen = new Set([id]), q = [id]; while (q.length) { const c = q.shift(); edges.forEach(e => { if (e[from] === c && !seen.has(e[to])) { seen.add(e[to]); q.push(e[to]); } }); } return seen; };
+      const ups = walk("target", "source"), downs = walk("source", "target");
+      const row = e => `<tr><td>${escHtml(lnName(e.source))}</td><td>${escHtml(lnName(e.target))}</td><td><code>${escHtml(e.script || "—")}</code></td><td>${(e.tasks || []).length ? e.tasks.map(t => `<span class="tag blue">${escHtml(t === "manual" ? "手动" : t)}</span>`).join(" ") : '<span class="tag gray">无</span>'}</td><td>${e.auto ? '<span class="tag success">读代码识别</span>' : '<span class="tag warning">手工补充</span>'}</td></tr>`;
+      const tbl = (title, list) => `<div style="margin:12px 0 6px;font-weight:600">${title}（${list.length} 条）</div>` + (list.length
+        ? `<table><thead><tr><th>从</th><th>到</th><th>由哪个脚本产生</th><th>调度任务</th><th>来源</th></tr></thead><tbody>${list.map(row).join("")}</tbody></table>`
+        : '<div class="empty">没有</div>');
+      $("lnPanelTitle").textContent = n.label;
+      $("lnPanelBody").innerHTML = `<div><span class="tag blue">${LN_KIND[n.kind] || n.kind}</span> <span class="tag gray">${LN_LAYER[n.layer] || n.layer}</span> <span style="color:#86909c;margin-left:8px">${escHtml(n.id)}</span></div>
+        <div style="margin-top:8px;color:#4e5969">整条链路上，上游 ${[...ups].filter(x => x !== id).length} 个，下游 ${[...downs].filter(x => x !== id).length} 个，相关连线 ${edges.length} 条。</div>`
+        + tbl("直接上游", up) + tbl("直接下游", down);
+      $("lnPanel").style.display = "";
+    }
+    function lnFind() {
+      const q = $("lnSearch").value.trim().toLowerCase();
+      if (!q || !lnAll) return;
+      const n = lnAll.nodes.find(x => x.label.toLowerCase() === q) || lnAll.nodes.find(x => x.label.toLowerCase().includes(q) || x.id.toLowerCase().includes(q));
+      if (!n) { toast("没找到叫这个名字的表或接口"); return; }
+      lnPick(n.id);
+    }
+    charts.chartLineage.on("click", p => { if (p.dataType === "node") lnPick(p.data.id); });
+    window.addEventListener("resize", () => { if (lnAll && $("view-lineage").classList.contains("active")) lnDraw(); });
+    $("lnFind").onclick = lnFind;
+    $("lnSearch").addEventListener("keydown", e => { if (e.key === "Enter") lnFind(); });
+    $("lnSearch").addEventListener("change", lnFind);
+    $("lnReset").onclick = () => { lnSel = lnHi = lnHiEdges = null; $("lnSearch").value = ""; $("lnPanel").style.display = "none"; if (lnAll) lnDraw(); };
     function rtStop() { clearInterval(rtTimer); rtTimer = null; }
     function route() {
       let r = (location.hash.match(/^#\/(\w+)/) || [])[1];
@@ -1313,6 +1425,7 @@
       requestAnimationFrame(resizeAll);
       if (r === "runs") loadRuns();
       if (r === "site") loadSite();
+      if (r === "lineage") loadLineage();
       if (r === "realtime") rtStart(); else rtStop();
     }
     const go = r => { location.hash = "#/" + r; };

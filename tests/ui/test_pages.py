@@ -15,7 +15,7 @@ pw = pytest.importorskip("playwright.sync_api")
 
 UI_BASE = os.environ.get("UI_BASE", "http://127.0.0.1:5096/index.html")
 API_BASE = os.environ.get("API_BASE", "http://127.0.0.1:5000")
-PAGES = ["overview", "zone", "baseline", "map", "site", "realtime", "alerts", "quality", "tickets"]
+PAGES = ["overview", "zone", "baseline", "map", "site", "realtime", "lineage", "alerts", "quality", "tickets"]
 BANNED = re.compile(r"口径|基线|窗口|stub|（无）|undefined|NaN|\[object Object\]")
 
 pytestmark = pytest.mark.skipif(not os.environ.get("UI_TESTS"), reason="设 UI_TESTS=1 才跑页面测试（要先起页面和接口）")
@@ -238,4 +238,54 @@ def test_realtime_page_fixture_and_refresh(browser):
     assert state["calls"] == calls, "离开实时页后应停止刷新"
     assert not probs["js"], probs["js"]
     assert not BANNED.findall(pg.evaluate("document.body.innerText"))
+    pg.close()
+
+
+def test_lineage_page_fixture(browser):
+    """数据血缘：分层画图、点节点标亮上下游并出详情、搜索、出错和空数据提示。"""
+    import json
+    from urllib.parse import urlparse, parse_qs
+    pg, probs = open_page(browser)
+    N = lambda i, k, l, lab: {"id": i, "kind": k, "layer": l, "name": lab, "label": lab}
+    nodes = [N("raw:a", "raw", "raw", "站点 CSV"), N("lake:ods/a", "lake", "ods", "ods/a"), N("hive:ods.a", "hive", "ods", "ods.a"),
+             N("mysql:t_a", "mysql", "ads", "t_a"), N("api:/api/a", "api", "api", "/api/a"), N("mysql:t_other", "mysql", "ads", "t_other")]
+    E = lambda s, t, sc, tasks, auto=True: {"source": s, "target": t, "kind": "write", "script": sc, "tasks": tasks, "auto": auto}
+    edges = [E("raw:a", "lake:ods/a", "etl/ingest.py", ["ods_ingest"]), E("lake:ods/a", "hive:ods.a", "etl/ingest.py", ["ods_ingest"]),
+             E("hive:ods.a", "mysql:t_a", "spark/jobs/pub.py", ["publish"], False), E("mysql:t_a", "api:/api/a", "GET /api/a", [])]
+    mode = {"v": "ok"}
+    def handle(r):
+        q = parse_qs(urlparse(r.request.url).query)
+        if mode["v"] == "err":
+            return r.fulfill(status=500, content_type="application/json", body=json.dumps({"ok": False, "error": "boom"}))
+        if mode["v"] == "empty":
+            d = {"nodes": [], "edges": []}
+        elif q.get("node"):
+            assert q.get("direction") == ["both"]
+            d = {"nodes": nodes[:5], "edges": edges}
+        else:
+            d = {"nodes": nodes, "edges": edges}
+        r.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "data": d}))
+    pg.route("**/api/lineage*", handle)
+    pg.goto(f"{UI_BASE}#/lineage"); pg.wait_for_timeout(1500)
+    js = "echarts.getInstanceByDom(document.getElementById('chartLineage')).getOption()"
+    assert pg.evaluate(js + ".series[0].data.length") == 6
+    heads = pg.evaluate(js + ".graphic[0].elements.map(e => e.style.text)")
+    assert heads == ["原始文件", "数据湖", "Hive 表", "消息流和文件", "业务库", "接口"]
+    xs = dict(pg.evaluate(js + ".series[0].data.map(d => [d.id, d.x])"))
+    assert xs["raw:a"] < xs["lake:ods/a"] < xs["hive:ods.a"] < xs["mysql:t_a"] < xs["api:/api/a"]
+    pg.fill("#lnSearch", "t_a"); pg.press("#lnSearch", "Enter"); pg.wait_for_timeout(800)
+    body = pg.inner_text("#lnPanelBody")
+    assert pg.inner_text("#lnPanelTitle") == "t_a"
+    assert "spark/jobs/pub.py" in body and "publish" in body and "手工补充" in body and "GET /api/a" in body
+    op = pg.evaluate(js + ".series[0].data.map(d => [d.id, d.itemStyle.opacity])")
+    assert dict(op)["mysql:t_other"] < 0.5 and dict(op)["raw:a"] == 1
+    assert "已标亮 5 个节点" in pg.inner_text("#lnExtra")
+    pg.click("#lnReset"); pg.wait_for_timeout(300)
+    assert not pg.is_visible("#lnPanel")
+    assert not probs["js"], probs["js"]
+    assert not BANNED.findall(pg.evaluate("document.body.innerText"))
+    for m, txt in (("err", "血缘数据暂时取不到"), ("empty", "还没有血缘数据")):
+        mode["v"] = m
+        pg.goto(f"{UI_BASE}#/overview"); pg.reload(); pg.goto(f"{UI_BASE}#/lineage"); pg.wait_for_timeout(1200)
+        assert txt in pg.inner_text("#lnState")
     pg.close()
