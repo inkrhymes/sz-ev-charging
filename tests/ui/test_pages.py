@@ -15,7 +15,7 @@ pw = pytest.importorskip("playwright.sync_api")
 
 UI_BASE = os.environ.get("UI_BASE", "http://127.0.0.1:5096/index.html")
 API_BASE = os.environ.get("API_BASE", "http://127.0.0.1:5000")
-PAGES = ["overview", "zone", "baseline", "map", "site", "alerts", "quality", "tickets"]
+PAGES = ["overview", "zone", "baseline", "map", "site", "realtime", "alerts", "quality", "tickets"]
 BANNED = re.compile(r"口径|基线|窗口|stub|（无）|undefined|NaN|\[object Object\]")
 
 pytestmark = pytest.mark.skipif(not os.environ.get("UI_TESTS"), reason="设 UI_TESTS=1 才跑页面测试（要先起页面和接口）")
@@ -206,4 +206,36 @@ def test_fmt_dur_hours_and_minutes(browser):
     text = pg.inner_text("#view-tickets")
     import re as _re
     assert not _re.search(r"\d+\.\d+ 小时", text), "处理用时不该再出现小数小时"
+    pg.close()
+
+
+def test_realtime_page_fixture_and_refresh(browser):
+    """实时占用：先空着显示提示，回放开始后自动刷新出数据。"""
+    import json
+    pg, probs = open_page(browser)
+    state = {"zones": [], "calls": 0}
+    def z(t, occ, ws="2026-10-25 16:30:00", we="2026-10-25 16:45:00"):
+        return {"taz_id": t, "window_start": ws, "window_end": we, "occupancy": occ, "busy_sum": int(occ * 20), "piles_sum": 20,
+                "station_cnt": 2, "outlier_cnt": 0, "dropped_src_cnt": 0, "write_ts": "2026-10-25 16:45:03", "latency_ms": 800}
+    def handle(r):
+        state["calls"] += 1
+        r.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "data": {"source": "mysql", "zones": state["zones"]}}))
+    pg.route("**/api/realtime/zones*", handle)
+    pg.goto(f"{UI_BASE}#/realtime")
+    pg.wait_for_timeout(1500)
+    assert "实时数据还没开始，回放开始后这里会自动刷新" in pg.inner_text("#rtBody")
+    state["zones"] = [z("101", 0.2), z("102", 0.75), z("103", 0.4, "2026-10-25 16:15:00", "2026-10-25 16:30:00")]
+    pg.wait_for_timeout(6000)  # 等一次自动刷新
+    s = pg.inner_text("#rtSum")
+    assert "16:30–16:45" in s and "3 个" in s and "其中 2 个" in s
+    rows = pg.inner_text("#rtBody")
+    assert rows.index("片区 102") < rows.index("片区 103") < rows.index("片区 101")
+    assert "还没更新" in rows
+    n = pg.evaluate("echarts.getInstanceByDom(document.getElementById('chartRt')).getOption().series[0].data.length")
+    assert n == 3 and state["calls"] >= 2
+    calls = state["calls"]
+    pg.goto(f"{UI_BASE}#/overview"); pg.wait_for_timeout(6000)
+    assert state["calls"] == calls, "离开实时页后应停止刷新"
+    assert not probs["js"], probs["js"]
+    assert not BANNED.findall(pg.evaluate("document.body.innerText"))
     pg.close()

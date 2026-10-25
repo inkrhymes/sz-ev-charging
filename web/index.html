@@ -205,6 +205,7 @@
       <li data-route="baseline"><svg class="ic"><use href="#i-trend"/></svg><span>和上小时比</span></li>
       <li data-route="map"><svg class="ic"><use href="#i-map"/></svg><span>片区地图</span></li>
       <li data-route="site"><svg class="ic"><use href="#i-map"/></svg><span>选址补桩</span></li>
+      <li data-route="realtime"><svg class="ic"><use href="#i-trend"/></svg><span>实时占用</span></li>
     </ul>
     <div class="group">数据治理</div>
     <ul class="nav"><li data-route="quality"><svg class="ic"><use href="#i-shield"/></svg><span>数据质量</span></li>
@@ -283,6 +284,18 @@
         <div class="card-body">
           <table><thead><tr><th>数据日期</th><th>开始时间</th><th>用时</th><th>结果</th><th>各步骤</th></tr></thead><tbody id="runsBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody></table><div class="pager" id="runsPager"></div>
         </div></div>
+    </section>
+    <section class="view" id="view-realtime">
+      <div class="grid kpis6" id="rtSum"></div>
+      <div class="grid">
+        <div class="card col-24"><div class="card-head"><div class="card-title">最忙的 20 个片区<span class="tip" data-tip="按最近 15 分钟的占用率排，红色超过五成，橙色三成到五成，蓝色三成以下"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="rtExtra"></div></div>
+          <div class="card-body"><div id="chartRt" style="height:360px"></div></div></div>
+        <div class="card col-24"><div class="card-head"><div class="card-title">全部片区</div></div>
+          <div class="card-body">
+            <table><thead><tr><th>排名</th><th>片区</th><th>时间段</th><th>占用率</th><th>在用桩 / 总桩</th><th>站数</th></tr></thead><tbody id="rtBody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table>
+            <div class="pager" id="rtPager"></div>
+          </div></div>
+      </div>
     </section>
     <section class="view" id="view-site">
       <div class="grid kpis6" id="siteSum"></div>
@@ -432,6 +445,7 @@
       overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
       zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
       baseline: ["运行监控", "和上小时比", "实际占用和上一小时参考值差多少"],
+      realtime: ["运行监控", "实时占用", "每 15 分钟更新一次各片区的占用情况，页面每 5 秒自动刷新"],
       site: ["运行监控", "选址补桩", "哪些片区桩不够用、建议加几根，哪些先观察"],
       map: ["运行监控", "片区地图", "在地图上看哪片最忙，点一下看片区里的站"],
       alerts: ["运维管理", "异常告警", "数据检查发现的问题都列在这里，管理员可以跟进和关闭"],
@@ -457,7 +471,7 @@
     });
     const $ = id => document.getElementById(id);
     const charts = {};
-    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite", "chartFcDaily"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
+    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite", "chartFcDaily", "chartRt"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
     const resizeAll = () => Object.values(charts).forEach(c => c.resize());
     const pct = v => (v * 100).toFixed(0) + "%";
     const tsLabel = ts => ts.slice(5, 16);   // MM-DD HH:mm
@@ -1244,6 +1258,51 @@
       }).join("")}</tbody></table>` : `<span class="readonly-note">这一天没有记下步骤</span>`;
     }
 
+    /* ---------- 实时占用 ---------- */
+    const RT_EMPTY = "实时数据还没开始，回放开始后这里会自动刷新";
+    const RT_EVERY = 5000;
+    let rtTimer = null, rtPage = 1, rtBusy = false;
+    const hm = v => String(v || "").slice(11, 16);
+    async function loadRealtime() {
+      if (rtBusy) return; rtBusy = true;
+      let zones = [], failed = false;
+      try { const d = await apiGet("/api/realtime/zones"); zones = (d && d.zones) || []; } catch (e) { failed = true; }
+      finally { rtBusy = false; }
+      const now = new Date().toTimeString().slice(0, 8);
+      $("rtExtra").textContent = failed ? `${now} 这次没取到，5 秒后再试` : `${now} 刷新`;
+      if (failed && rtRows.length) return;  // 偶尔一次没取到，保留上一次的画面
+      rtRows = zones.filter(z => z.occupancy != null).sort((a, b) => b.occupancy - a.occupancy);
+      const empty = !rtRows.length;
+      const latest = rtRows.reduce((m, z) => (z.window_end > m ? z.window_end : m), "");
+      const latestRow = rtRows.find(z => z.window_end === latest);
+      const atLatest = rtRows.filter(z => z.window_end === latest).length;
+      const busy = rtRows.reduce((a, z) => a + (+z.busy_sum || 0), 0), piles = rtRows.reduce((a, z) => a + (+z.piles_sum || 0), 0);
+      const lat = rtRows.map(z => z.latency_ms).filter(v => v != null);
+      const latAvg = lat.length ? lat.reduce((a, b) => a + b, 0) / lat.length : null;
+      $("rtSum").innerHTML = [
+        ["最新时间段", empty ? "—" : `${hm(latestRow.window_start)}–${hm(latest)}`, empty ? RT_EMPTY : `${String(latest).slice(0, 10)}，每 15 分钟一段`],
+        ["有数据的片区", empty ? "—" : `${rtRows.length} 个`, empty ? "" : `其中 ${atLatest} 个已更新到最新时间段`],
+        ["全市占用率", empty || !piles ? "—" : `${(busy / piles * 100).toFixed(1)}<small>%</small>`, empty ? "" : `${busy} 根在用 / 共 ${piles} 根`],
+        ["数据延迟", latAvg == null ? "—" : latAvg < 1000 ? `${Math.round(latAvg)} 毫秒` : `${(latAvg / 1000).toFixed(1)} 秒`, latAvg == null ? "" : "从采到数据到写进库，各片区平均"],
+      ].map(([l, v, f]) => `<div class="card col-6 kpi"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div><div class="kpi-foot">${escHtml(f)}</div></div>`).join("");
+      const top = rtRows.slice(0, 20);
+      charts.chartRt.setOption({
+        tooltip: { trigger: "item", formatter: p => { const z = p.data.raw; return `片区 ${escHtml(z.taz_id)}<br>${hm(z.window_start)}–${hm(z.window_end)} 占用 ${(z.occupancy * 100).toFixed(1)}%<br>${z.busy_sum ?? "—"} / ${z.piles_sum ?? "—"} 根桩在用`; } },
+        grid: { left: 48, right: 24, top: 24, bottom: 40 },
+        xAxis: { type: "category", data: top.map(z => "片区 " + z.taz_id), axisLabel: { interval: 0, rotate: 30 } },
+        yAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+        series: [{ type: "bar", barMaxWidth: 28, data: top.map(z => ({ value: +(z.occupancy * 100).toFixed(1), raw: z, itemStyle: { color: occColor(z.occupancy) } })) }],
+        graphic: empty ? [{ type: "text", left: "center", top: "middle", style: { text: RT_EMPTY, fill: "#86909C", fontSize: 14 } }] : [],
+      }, true);
+      if (empty) { $("rtBody").innerHTML = `<tr><td colspan="6" class="empty">${RT_EMPTY}</td></tr>`; $("rtPager").innerHTML = ""; return; }
+      const size = 10, pages = Math.ceil(rtRows.length / size); if (rtPage > pages) rtPage = pages;
+      $("rtBody").innerHTML = rtRows.slice((rtPage - 1) * size, rtPage * size).map((z, i) =>
+        `<tr><td>${(rtPage - 1) * size + i + 1}</td><td>片区 ${escHtml(z.taz_id)}</td><td style="white-space:nowrap">${hm(z.window_start)}–${hm(z.window_end)}${z.window_end !== latest ? ' <span class="readonly-note">还没更新</span>' : ""}</td><td><span style="color:${occColor(z.occupancy)}">${(z.occupancy * 100).toFixed(1)}%</span></td><td>${z.busy_sum ?? "—"} / ${z.piles_sum ?? "—"}</td><td>${z.station_cnt ?? "—"}</td></tr>`).join("");
+      pager($("rtPager"), rtRows.length, rtPage, size, p => { rtPage = p; loadRealtime(); });
+    }
+    let rtRows = [];
+    function rtStart() { if (rtTimer) return; loadRealtime(); rtTimer = setInterval(() => { if (!document.hidden) loadRealtime(); }, RT_EVERY); }
+    function rtStop() { clearInterval(rtTimer); rtTimer = null; }
     function route() {
       let r = (location.hash.match(/^#\/(\w+)/) || [])[1];
       if (!ROUTES[r]) r = "overview";
@@ -1254,6 +1313,7 @@
       requestAnimationFrame(resizeAll);
       if (r === "runs") loadRuns();
       if (r === "site") loadSite();
+      if (r === "realtime") rtStart(); else rtStop();
     }
     const go = r => { location.hash = "#/" + r; };
     document.querySelectorAll(".nav li").forEach(li => li.onclick = () => go(li.dataset.route));
