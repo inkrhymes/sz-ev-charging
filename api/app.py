@@ -300,6 +300,23 @@ def health():
     return ok(data)
 
 
+@app.get("/api/data_range")
+def data_range():
+    """页面顶部「数据时间」：库里/文件里实际有数据的首尾日期（只读）。"""
+    if use_mysql():
+        r = _sql("SELECT MIN(dt) AS d0, MAX(dt) AS d1 FROM ads_city_overview")
+        if r and r[0].get("d0"):
+            return ok({"from": str(r[0]["d0"])[:10], "to": str(r[0]["d1"])[:10]})
+    if use_file():
+        try:
+            ts = [r["ts_hour"][:10] for r in _zone_rows() if r.get("ts_hour")]
+            if ts:
+                return ok({"from": min(ts), "to": max(ts)})
+        except OSError:
+            pass
+    return ok({"from": "2022-09-01", "to": "2022-09-14"})
+
+
 @app.get("/api/overview")
 def overview():
     dt = request.args.get("dt") or "2022-09-01"

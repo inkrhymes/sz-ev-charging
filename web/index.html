@@ -173,7 +173,7 @@
   <header class="topbar">
     <div class="brand"><span class="mark"><svg class="ic"><use href="#i-bolt"/></svg></span>深圳市电动汽车充电站运行管理可视化系统</div>
     <div class="top-right">
-      <span class="hide-sm">数据时间：2022-09-01 至 2022-09-14</span>
+      <span class="hide-sm" id="dataRange">数据时间：2022-09-01 至 2022-09-14</span>
       <span id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">当前：连接中</span></span>
       <span class="icon-btn" id="btnTopRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg>刷新</span>
       <div class="user" id="userBox">
@@ -937,6 +937,13 @@
         tickets = await apiGet(`/api/tickets`);
         usingOffline = false;
         let mode = "";
+        try {
+          const rg = await apiGet(`/api/data_range`);
+          if (rg && rg.from && rg.to) {
+            $("dataRange").textContent = `数据时间：${rg.from} 至 ${rg.to}`;
+            for (const id of ["dateFrom", "dateTo"]) { $(id).min = rg.from; $(id).max = rg.to; }
+          }
+        } catch (e) { /* 取不到就保留默认 */ }
         try { mode = ((await apiGet(`/api/health`)) || {}).mode || ""; } catch (e) { /* 健康检查失败不影响展示 */ }
         $("srcDot").className = "dot on"; $("srcText").textContent = mode === "file" ? "当前：本机文件" : "当前：MySQL";
         $("srcState").title = API_BASE;

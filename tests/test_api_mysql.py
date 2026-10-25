@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 FAKE = {
+    "MIN(dt) AS d0": [{"d0": dt.date(2022, 9, 1), "d1": dt.date(2023, 2, 28)}],
     "ads_city_overview": [{"dt": dt.date(2022, 9, 1), "station_cnt": 1682, "zone_cnt": 325, "avg_occupancy": Decimal("0.303123"),
                            "peak_hour": 6, "stuck_cnt": 6, "high_missing_cnt": 180}],
     "DISTINCT taz_id": [{"taz_id": "102"}, {"taz_id": "11"}],
@@ -141,3 +142,14 @@ def test_real_mysql_smoke(app_mod):
     c = app_mod.app.test_client()
     assert data(c.get("/api/overview?dt=2022-09-01"))["station_cnt"] == 1682
     assert len(data(c.get("/api/zone/series"))["points"]) > 0
+
+
+def test_data_range_mysql(app_mod, monkeypatch):
+    monkeypatch.setattr(app_mod, "_sql", fake_sql)
+    assert data(app_mod.app.test_client().get("/api/data_range")) == {"from": "2022-09-01", "to": "2023-02-28"}
+
+
+def test_data_range_file(app_mod, monkeypatch):
+    monkeypatch.setenv("API_SOURCE", "file")
+    d = data(app_mod.app.test_client().get("/api/data_range"))
+    assert d["from"] <= d["to"] and d["from"].startswith("2022-")
