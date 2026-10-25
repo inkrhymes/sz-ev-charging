@@ -152,3 +152,25 @@ def test_lake_map_optional(monkeypatch, tmp_path):
     appmod._lake_map.cache_clear()
     assert appmod._lake_map() is None
     appmod._lake_map.cache_clear()
+
+
+def test_map_zones_get_not_405(client):
+    # 小黑遇到的 405：未知 /api 路径被只登记了 OPTIONS 的兜底路由接住
+    assert client.get("/api/map/zones").status_code == 200
+    assert client.options("/api/map/zones").status_code in (200, 204)
+    r = client.get("/api/no-such-thing")
+    assert r.status_code == 404 and r.get_json()["ok"] is False
+
+
+def test_lake_map_real_ads(monkeypatch):
+    import os, app as appmod
+    from pathlib import Path
+    root = os.getenv("SZ_EV_LAKE") or "/workspace/sz-ev-charging/data/lake"
+    if not (Path(root) / "ads" / "zone_hour").exists():
+        import pytest; pytest.skip("没有真实 lake 数据")
+    monkeypatch.setattr(appmod, "LAKE", root)
+    appmod._lake_map.cache_clear()
+    zones, stations = appmod._lake_map()
+    appmod._lake_map.cache_clear()
+    assert len(stations) == 1682 and len(zones) == 331
+    assert sum(z["avg_occupancy"] is not None for z in zones) > 300

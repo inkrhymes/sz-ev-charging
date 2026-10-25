@@ -41,9 +41,13 @@ def dashboard():
     return send_from_directory(str(REPO / "web"), "index.html")
 
 
-@app.route("/api/<path:_any>", methods=["OPTIONS"])
-def _options(_any):
-    return ("", 204)
+@app.route("/api/<path:_any>", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"])
+def _api_fallback(_any):
+    # 只用来应答跨域预检。以前这里只登记了 OPTIONS，旧代码里没有的接口会被它接住、回 405，
+    # 看起来像"方法不对"；现在未知接口统一回 404，一眼能看出是服务端代码没更新。
+    if request.method == "OPTIONS":
+        return ("", 204)
+    return jsonify({"ok": False, "error": f"接口不存在：/api/{_any}（服务端可能还是旧版本）"}), 404
 
 
 def ok(data):
@@ -440,24 +444,30 @@ if __name__ == "__main__":
 
 
 # ---- 片区地图 / 告警（小黄，前端第 6、7 页）----
-LAKE = os.getenv("SZ_EV_LAKE", "")
+LAKE = os.getenv("SZ_EV_LAKE") or str(REPO / "data" / "lake")
 
 
 @lru_cache(maxsize=1)
 def _lake_map():
     """可选：SZ_EV_LAKE 指向数据湖根目录（含 ods/station_info、ads/zone_hour，可选 dwd/quality_station）时读 parquet。
     只读需要的列并在 pyarrow 里聚合，内存占用很小；缺任何一块就返回 None，退回 demo CSV。"""
-    if not LAKE:
-        return None
     root = Path(LAKE)
+    if not (root / "ods" / "station_info").exists() or not (root / "ads" / "zone_hour").exists():
+        return None
     try:
         import pyarrow.dataset as pads
         import pyarrow.compute as pc
         si = pads.dataset(root / "ods" / "station_info", format="parquet", partitioning="hive") \
             .to_table(columns=["station_id", "longitude", "latitude", "charge_count", "taz_id"]).to_pylist()
-        zh = pads.dataset(root / "ads" / "zone_hour", format="parquet", partitioning="hive") \
-            .to_table(columns=["taz_id", "occupancy_avg", "piles_sum", "station_cnt"])
-        g = zh.group_by("taz_id").aggregate([("occupancy_avg", "mean"), ("piles_sum", "max"), ("station_cnt", "max")]).to_pylist()
+        zds = pads.dataset(root / "ads" / "zone_hour", format="parquet", partitioning="hive")
+        has_center = {"center_lon", "center_lat"} <= set(zds.schema.names)
+        cols = ["taz_id", "occupancy_avg", "busy_sum", "piles_sum", "station_cnt"] + (["center_lon", "center_lat"] if has_center else [])
+        zh = zds.to_table(columns=cols)
+        zh = zh.set_column(0, "taz_id", pc.cast(zh["taz_id"], "string"))
+        aggs = [("occupancy_avg", "mean"), ("busy_sum", "sum"), ("piles_sum", "sum"), ("piles_sum", "max"), ("station_cnt", "max")]
+        if has_center:
+            aggs += [("center_lon", "max"), ("center_lat", "max")]
+        g = zh.group_by("taz_id").aggregate(aggs).to_pylist()
     except Exception:
         return None
     qual = {}
@@ -484,24 +494,69 @@ def _lake_map():
     for taz, (lon, lat, n, piles) in pos.items():
         o = occ.get(taz, {})
         v = o.get("occupancy_avg_mean")
-        zones.append({"taz_id": taz, "lon": round(lon / n, 6), "lat": round(lat / n, 6),
-                      "station_count": o.get("station_cnt_max") or n, "total_piles": o.get("piles_sum_max") or piles,
+        if v is None and o.get("piles_sum_sum"):  # 有的小时 occupancy_avg 为空，用忙桩数/总桩数补
+            v = (o.get("busy_sum_sum") or 0) / o["piles_sum_sum"]
+        clon, clat = o.get("center_lon_max"), o.get("center_lat_max")
+        zones.append({"taz_id": taz, "lon": round(clon if clon is not None else lon / n, 6),
+                      "lat": round(clat if clat is not None else lat / n, 6),
+                      "station_count": o.get("station_cnt_max") or n, "total_piles": piles,  # piles_sum 是 5 分钟粒度累加，不能当桩数
                       "avg_occupancy": round(v, 4) if v is not None else None})
+    return zones, stations
+
+
+def _mysql_map():
+    """MAP_DB=mysql 时优先读库：dim_station（站点坐标）+ ads_zone_daily（片区日均、中心点，取最新一天）。连不上就返回 None。"""
+    if os.getenv("MAP_DB", "").lower() != "mysql":
+        return None
+    try:
+        import pymysql
+        conn = pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
+                               user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
+                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", connect_timeout=3,
+                               cursorclass=pymysql.cursors.DictCursor)
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT station_id, taz_id, longitude, latitude, total_piles FROM dim_station")
+            si = cur.fetchall()
+            cur.execute("SELECT taz_id, avg_occupancy, station_cnt, pile_cnt, center_lon, center_lat FROM ads_zone_daily "
+                        "WHERE dt = (SELECT MAX(dt) FROM ads_zone_daily)")
+            zd = {str(r["taz_id"]): r for r in cur.fetchall()}
+    except Exception:
+        return None
+    if not si:
+        return None
+    f = lambda v: float(v) if v is not None else None
+    stations, pos = [], defaultdict(lambda: [0.0, 0.0, 0, 0])
+    for r in si:
+        taz = str(r["taz_id"])
+        stations.append({"station_id": str(r["station_id"]), "taz_id": taz, "lon": f(r["longitude"]), "lat": f(r["latitude"]),
+                         "total_piles": r["total_piles"], "avg_occupancy": None, "missing_rate": None,
+                         "status": "normal", "status_label": STATUS_LABEL["normal"]})
+        a = pos[taz]; a[0] += f(r["longitude"]); a[1] += f(r["latitude"]); a[2] += 1; a[3] += r["total_piles"] or 0
+    zones = []
+    for taz, (lon, lat, n, piles) in pos.items():
+        z = zd.get(taz, {})
+        occ = f(z.get("avg_occupancy"))
+        zones.append({"taz_id": taz, "lon": round(f(z.get("center_lon")) or lon / n, 6), "lat": round(f(z.get("center_lat")) or lat / n, 6),
+                      "station_count": z.get("station_cnt") or n, "total_piles": z.get("pile_cnt") or piles,
+                      "avg_occupancy": round(occ, 4) if occ is not None else None})
     return zones, stations
 
 
 @app.get("/api/map/zones")
 def map_zones():
     """片区地图：每个片区的中心经纬度、站数、平均占用率，以及站点坐标。"""
-    lake = _lake_map()
+    src = "mysql"
+    lake = _mysql_map()
+    if not lake:
+        src, lake = "lake", _lake_map()
     if lake:
         zones, stations = lake
         taz = request.args.get("taz_id")
         if taz:
-            return ok({"zones": [], "stations": [s for s in stations if s["taz_id"] == taz], "source": "lake"})
+            return ok({"zones": [], "stations": [s for s in stations if s["taz_id"] == taz], "source": src})
         # 站多时不一次性返回，前端点片区时再按 taz_id 取
         return ok({"zones": zones, "stations": stations if len(stations) <= 300 else [],
-                   "station_total": len(stations), "source": "lake"})
+                   "station_total": len(stations), "source": src})
     if not use_file():
         return ok({"zones": [], "stations": []})
     demo_list = REPO / "data" / "demo" / "demo_station_list.csv"
