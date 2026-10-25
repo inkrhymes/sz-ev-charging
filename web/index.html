@@ -174,12 +174,12 @@
     <div class="brand"><span class="mark"><svg class="ic"><use href="#i-bolt"/></svg></span>深圳市电动汽车充电站运行管理可视化系统</div>
     <div class="top-right">
       <span class="hide-sm">数据窗口：2022-09-01 至 2022-09-14</span>
-      <span id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">数据源：连接中</span></span>
+      <span id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">当前：连接中</span></span>
       <span class="icon-btn" id="btnTopRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg>刷新</span>
       <div class="user" id="userBox">
-        <span class="avatar" id="avatar">访</span><span id="userName">只读访客</span><svg class="ic" style="color:var(--text-3)"><use href="#i-down"/></svg>
+        <span class="avatar" id="avatar">访</span><span id="userName">访客</span><svg class="ic" style="color:var(--text-3)"><use href="#i-down"/></svg>
         <div class="menu-pop" id="userPop">
-          <div class="info"><div id="popName">访客</div><div id="popRole">只读访客</div></div>
+          <div class="info"><div id="popName">访客</div><div id="popRole">访客</div></div>
           <div class="item" id="menuLogin">切换账号 / 登录</div>
           <div class="item" id="menuLogout">退出登录</div>
         </div>
@@ -209,13 +209,13 @@
     <section class="view" id="view-overview">
       <div class="grid kpis6" id="kpis"></div>
       <div class="grid">
-        <div class="card col-16"><div class="card-head"><div class="card-title">片区占用率趋势<span class="tip" data-tip="所选片区内各站小时级平均占用率（占用桩数/总桩数）"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="ovSeriesExtra"></div></div>
+        <div class="card col-16"><div class="card-head"><div class="card-title">片区占用率趋势<span class="tip" data-tip="这个片区里，每小时平均有多少桩在用"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="ovSeriesExtra"></div></div>
           <div class="card-body"><div id="chartOverview" class="chart-main"></div></div></div>
-        <div class="card col-8"><div class="card-head"><div class="card-title">工单概况<span class="tip" data-tip="由数据质量异常自动生成的巡检与维修工单"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="tickets">查看全部</a></div>
+        <div class="card col-8"><div class="card-head"><div class="card-title">工单概况<span class="tip" data-tip="数据异常时自动开的巡检、维修单"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="tickets">查看全部</a></div>
           <div class="card-body"><div class="stat-list" id="ticketStat"></div><div id="chartTicket" class="chart-sub" style="height:236px"></div></div></div>
       </div>
-      <div class="card"><div class="card-head"><div class="card-title">待关注站点<span class="tip" data-tip="质检判定为卡死或高缺失、建议生成工单的站点"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="quality">查看质检明细</a></div>
-        <div class="card-body"><table><thead><tr><th>站点</th><th>片区</th><th>问题类型</th><th class="num">缺失率</th><th class="num">最长断档（天）</th><th>建议工单</th></tr></thead><tbody id="ovStationBody"></tbody></table></div></div>
+      <div class="card"><div class="card-head"><div class="card-title">待关注站<span class="tip" data-tip="读数异常或缺数偏多、建议开单的站"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="quality">查看异常站</a></div>
+        <div class="card-body"><table><thead><tr><th>站</th><th>片区</th><th>问题</th><th class="num">缺数比例</th><th class="num">最长断档（天）</th><th>建议工单</th></tr></thead><tbody id="ovStationBody"></tbody></table></div></div>
     </section>
 
     <!-- 片区分析 -->
@@ -226,7 +226,7 @@
         <div class="ops"><button class="btn" id="btnReset">重置</button><button class="btn primary" id="btnRefresh">查询</button></div>
       </div>
       <div class="grid">
-        <div class="card col-24"><div class="card-head"><div class="card-title">占用率与估算负荷<span class="tip" data-tip="估算负荷 = 占用桩数 × 单桩额定功率，仅作趋势参考"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="seriesExtra"></div></div>
+        <div class="card col-24"><div class="card-head"><div class="card-title">占用率与估算负荷<span class="tip" data-tip="按「在用桩数 × 单桩功率」估算，只看趋势"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="seriesExtra"></div></div>
           <div class="card-body"><div id="chartSeries" class="chart-main"></div></div></div>
         <div class="card col-24"><div class="card-head"><div class="card-title">小时明细</div><div class="card-extra" id="seriesCount"></div></div>
           <div class="card-body"><table><thead><tr><th>时间</th><th>片区</th><th class="num">占用率</th><th class="num">估算负荷（kW）</th></tr></thead><tbody id="seriesBody"></tbody></table><div class="pager" id="seriesPager"></div></div></div>
@@ -236,13 +236,13 @@
     <!-- 基线对比 -->
     <section class="view" id="view-baseline">
       <div class="grid">
-        <div class="card col-6 kpi"><div class="kpi-label">平均绝对误差 MAE<span class="tip" data-tip="|实际值 − 上一时刻基线| 的平均值，越小越好"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="kpi-val" id="maeVal">-</div><div class="kpi-foot" id="maeFoot"></div></div>
+        <div class="card col-6 kpi"><div class="kpi-label">平均绝对误差 MAE<span class="tip" data-tip="实际值与参考值差多少，越小说明变化越平稳"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="kpi-val" id="maeVal">-</div><div class="kpi-foot" id="maeFoot"></div></div>
         <div class="card col-6 kpi"><div class="kpi-label">最大绝对误差</div><div class="kpi-val" id="maxErrVal">-</div><div class="kpi-foot" id="maxErrFoot"></div></div>
         <div class="card col-6 kpi"><div class="kpi-label">样本点数</div><div class="kpi-val" id="nVal">-</div><div class="kpi-foot">小时粒度</div></div>
         <div class="card col-6 kpi"><div class="kpi-label">对比片区</div><div class="kpi-val" id="bzVal">-</div><div class="kpi-foot">在「片区分析」中切换</div></div>
       </div>
       <div class="grid">
-        <div class="card col-24"><div class="card-head"><div class="card-title">实际占用率与上一时刻基线<span class="tip" data-tip="基线：用上一小时的实际值作为本小时的预测，是最简单的参照模型"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
+        <div class="card col-24"><div class="card-head"><div class="card-title">实际占用 vs 上一小时参考<span class="tip" data-tip="拿上一小时的实际占用，当作这一小时的参考值，方便看出突然变高或变低"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
           <div class="card-body"><div id="chartBaseline" class="chart-main"></div></div></div>
         <div class="card col-24"><div class="card-head"><div class="card-title">逐小时绝对误差</div></div>
           <div class="card-body"><div id="chartErr" class="chart-sub"></div></div></div>
@@ -252,15 +252,15 @@
     <!-- 数据质量 -->
     <section class="view" id="view-quality">
       <div class="grid" id="qualityKpis"></div>
-      <div class="card"><div class="card-head"><div class="card-title">质检指标明细<span class="tip" data-tip="来自数据质检报告，窗口内全部样本站统计"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
-        <div class="card-body"><table><thead><tr><th>指标</th><th class="num">数值</th><th>统计口径</th><th>判定</th></tr></thead><tbody id="qualityBody"></tbody></table></div></div>
-      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">站点质检明细<span class="tip" data-tip="窗口内每个站点的占用、电量与缺失情况；占用率排名按全部站点从高到低"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="stationExtra"></div></div>
+      <div class="card"><div class="card-head"><div class="card-title">数据检查结果<span class="tip" data-tip="窗口内全部样本站的检查结果"><svg class="ic"><use href="#i-info"/></svg></span></div></div>
+        <div class="card-body"><table><thead><tr><th>指标</th><th class="num">数值</th><th>说明</th><th>结论</th></tr></thead><tbody id="qualityBody"></tbody></table></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">异常站列表<span class="tip" data-tip="窗口内每个站的占用、电量和缺数情况；占用排名从高到低"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="stationExtra"></div></div>
         <div class="sub-filter" style="margin-top:8px"><div class="tabs" id="stationTabs"></div>
           <div class="f" style="display:flex;align-items:center;gap:8px;color:var(--text-2)">片区<select id="stationZone" style="width:140px"><option value="">全部片区</option></select></div></div>
-        <div class="card-body"><table><thead><tr><th>站点</th><th>片区</th><th class="num">桩数</th>
+        <div class="card-body"><table><thead><tr><th>站</th><th>片区</th><th class="num">桩数</th>
           <th class="num sortable" data-sort="avg_occupancy">平均占用率<span class="sort-ic" data-ic="avg_occupancy"></span></th><th class="num">占用排名</th>
           <th class="num sortable" data-sort="total_volume_kwh">累计电量（kWh）<span class="sort-ic" data-ic="total_volume_kwh"></span></th>
-          <th class="num sortable" data-sort="missing_rate">缺失率<span class="sort-ic" data-ic="missing_rate"></span></th><th class="num">最长断档（天）</th><th>状态</th><th>建议工单</th></tr></thead>
+          <th class="num sortable" data-sort="missing_rate">缺数比例<span class="sort-ic" data-ic="missing_rate"></span></th><th class="num">最长断档（天）</th><th>状态</th><th>建议工单</th></tr></thead>
           <tbody id="stationBody"></tbody></table><div class="pager" id="stationPager"></div></div></div>
     </section>
 
@@ -269,7 +269,7 @@
       <div class="card">
         <div class="tabs" id="ticketTabs"></div>
         <div class="card-body">
-          <table><thead><tr><th>工单编号</th><th>站点</th><th>类型</th><th>状态</th><th>操作</th></tr></thead><tbody id="ticketBody"></tbody></table>
+          <table><thead><tr><th>单号</th><th>站</th><th>类型</th><th>状态</th><th>操作</th></tr></thead><tbody id="ticketBody"></tbody></table>
           <div class="pager" id="ticketPager"></div>
         </div>
       </div>
@@ -280,7 +280,7 @@
     <div class="modal-head">登录<span class="icon-btn" id="btnCloseLogin">关闭</span></div>
     <div class="modal-body">
       <div class="field"><label>账号</label><input id="userInput" value="demo" /></div>
-      <div class="field"><label>角色</label><select id="roleSelect"><option value="readonly">只读访客</option><option value="admin">运维管理员</option></select></div>
+      <div class="field"><label>角色</label><select id="roleSelect"><option value="readonly">访客</option><option value="admin">管理员</option></select></div>
       <button class="btn primary block" id="btnLogin">登录</button>
       <div class="login-msg" id="loginOut"></div>
     </div>
@@ -304,9 +304,9 @@
       })(),
       quality: [
         { metric: "row_missing_rate", value: 0.2642, note: "25站14天窗实测" },
-        { metric: "stuck_station_cnt", value: 4, note: "演示子集实测" },
+        { metric: "stuck_station_cnt", value: 4, note: "实测数据" },
         { metric: "high_missing_station_cnt", value: 6, note: "missing_rate>0.30" },
-        { metric: "demo_station_cnt", value: 25, note: "演示子集站数" },
+        { metric: "demo_station_cnt", value: 25, note: "接入站数" },
       ],
       baseline: (() => {
         const points = []; let prev = 0.35;
@@ -327,20 +327,20 @@
 
     /* ---------- 文案映射：界面上不出现原始字段名 / 英文状态 ---------- */
     const METRIC = {
-      row_missing_rate: { name: "数据缺失率", unit: "%", rate: true, note: "缺失记录数 / 应有记录数（5 分钟粒度）" },
-      stuck_station_cnt: { name: "卡死站", unit: "座", note: "连续多个时段读数不变的站点" },
-      high_missing_station_cnt: { name: "高缺失站", unit: "座", note: "单站缺失率超过 30%" },
-      demo_station_cnt: { name: "样本站", unit: "座", note: "纳入本系统统计的站点" },
+      row_missing_rate: { name: "缺数比例", unit: "%", rate: true, note: "缺了多少条记录（按每 5 分钟一条算）" },
+      stuck_station_cnt: { name: "读数异常", unit: "座", note: "连续多个时段读数一直不动的站" },
+      high_missing_station_cnt: { name: "缺数偏多", unit: "座", note: "缺数超过三成" },
+      demo_station_cnt: { name: "样本站", unit: "座", note: "接入本系统的站" },
     };
     const TYPE_CN = { repair: "维修", inspect: "巡检" };
     const STATUS = { open: ["待处理", "danger"], processing: ["处理中", "warning"], done: ["已完成", "success"] };
     const NEXT_LABEL = { open: "开始处理", processing: "标记完成" };
     const ROUTES = {
-      overview: ["运行监控", "运行总览", "全市充电站当日运行指标与工单概况"],
-      zone: ["运行监控", "片区分析", "按片区查看小时级占用率与估算负荷，可筛选日期范围"],
-      baseline: ["运行监控", "基线对比", "实际占用率与上一时刻基线预测的误差分析"],
-      quality: ["数据治理", "数据质量", "原始采集数据的缺失、卡死等质检结果"],
-      tickets: ["运维管理", "运维工单", "由质检异常生成的巡检与维修工单，管理员可流转状态"],
+      overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
+      zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
+      baseline: ["运行监控", "基线对比", "实际占用和上一小时参考值差多少"],
+      quality: ["数据治理", "数据质量", "采集数据有没有缺、有没有一直不动"],
+      tickets: ["运维管理", "运维工单", "数据异常时自动开单；管理员可以改状态"],
     };
 
     /* ---------- ECharts 主题（规范 2.7） ---------- */
@@ -390,12 +390,12 @@
     function renderKpis(o, validZones) {
       const zoneVal = validZones != null ? `${o.zone_cnt}<small>个（${validZones} 个有效）</small>` : `${o.zone_cnt}<small>个</small>`;
       const items = [
-        ["接入站点", `${o.station_cnt}<small>座</small>`, "", `统计日 ${o.dt || "-"}`, "纳入本系统的充电站数量"],
-        ["覆盖片区", zoneVal, "", "有效：存在完整时序数据", "按交通小区（TAZ）划分；部分片区站点数据全缺"],
-        ["平均占用率", `${((o.avg_occupancy || 0) * 100).toFixed(1)}<small>%</small>`, "", `峰值时段 ${String(o.peak_hour).padStart(2, "0")}:00`, "统计日全部站点小时占用率的平均值"],
-        ["峰值时段", `${String(o.peak_hour).padStart(2, "0")}:00`, "", "当日平均占用率最高的小时", "按小时聚合后取占用率最大的时段"],
-        ["卡死站", `${o.stuck_cnt}<small>座</small>`, "danger", "需排查采集终端", "连续多个时段读数不变的站点"],
-        ["高缺失站", `${o.high_missing_cnt}<small>座</small>`, "warning", "缺失率超过 30%", "单站数据缺失率超过 30% 的站点"],
+        ["接入站", `${o.station_cnt}<small>座</small>`, "", `数据日期 ${o.dt || "-"}`, "接入本系统的站"],
+        ["覆盖片区", zoneVal, "", validZones != null ? `其中 ${validZones} 个有完整曲线` : "按片区看覆盖", "按片区划分；有的片区暂时没有站数据"],
+        ["平均占用率", `${((o.avg_occupancy || 0) * 100).toFixed(1)}<small>%</small>`, "", `峰值时段 ${String(o.peak_hour).padStart(2, "0")}:00`, "当天所有站平均占用"],
+        ["峰值时段", `${String(o.peak_hour).padStart(2, "0")}:00`, "", "当日平均占用率最高的小时", "一天里占用最高的那个小时"],
+        ["读数异常", `${o.stuck_cnt}<small>座</small>`, "danger", "建议检查采集设备", "连续多个时段读数一直不动的站"],
+        ["缺数偏多", `${o.high_missing_cnt}<small>座</small>`, "warning", "缺数超过三成", "缺数超过三成的站"],
       ];
       $("kpis").innerHTML = items.map(([l, v, cls, f, t]) =>
         `<div class="card col-4 kpi"><div class="kpi-label">${l}${tip(t)}</div><div class="kpi-val ${cls}">${v}</div><div class="kpi-foot">${f}</div></div>`).join("");
@@ -461,13 +461,13 @@
       const pts = data.points || [];
       const x = pts.map(p => tsLabel(p.ts_hour));
       charts.chartBaseline.setOption({
-        legend: { data: ["实际占用率", "上一时刻基线"] },
+        legend: { data: ["实际占用率", "上一小时参考值"] },
         tooltip: { valueFormatter: v => (v * 100).toFixed(1) + "%" },
         xAxis: { type: "category", data: x, boundaryGap: false },
         yAxis: occAxis(),
         series: [
           { name: "实际占用率", type: "line", data: pts.map(p => p.y_true) },
-          { name: "上一时刻基线", type: "line", data: pts.map(p => p.y_hat_lag1), lineStyle: { type: "dashed", width: 2 } },
+          { name: "上一小时参考值", type: "line", data: pts.map(p => p.y_hat_lag1), lineStyle: { type: "dashed", width: 2 } },
         ],
       }, true);
       charts.chartErr.setOption({
@@ -500,12 +500,14 @@
         const m = METRIC[r.metric] || { name: "其他指标", unit: "", note: "" };
         const judge = /demo_station/.test(r.metric) ? '<span class="tag gray">参考</span>'
           : (m.rate ? r.value > 0.2 : r.value > 0) ? '<span class="tag warning">需关注</span>' : '<span class="tag success">正常</span>';
-        const note = String(r.note || "").replace(/missing_rate\s*>\s*0?\.30/i, "缺失率 > 30%").replace(/[A-Za-z_]{4,}/g, "").trim() || m.note;
+        const note = String(r.note || "")
+          .replace(/演示子集实测/g, "实测数据").replace(/演示子集站数/g, "接入站数").replace(/演示子集/g, "实测")
+          .replace(/missing_rate\s*>\s*0?\.30/i, "缺数超过三成").replace(/[A-Za-z_]{4,}/g, "").trim() || m.note;
         return `<tr><td>${m.name}</td><td class="num">${fmt(r)}${m.unit === "%" ? "%" : " " + m.unit}</td><td>${note}</td><td>${judge}</td></tr>`;
       }).join("");
     }
 
-    /* ---------- 站点质检明细（/api/stations） ---------- */
+    /* ---------- 异常站列表（/api/stations） ---------- */
     const SUGGEST_CN = { repair: "维修", inspect: "巡检", none: "无需" };
     const ST_TAG = { stuck: "danger", high_missing: "warning", normal: "success" };
     const stQ = { status: "", taz_id: "", sort: "avg_occupancy", order: "desc", page: 1, page_size: 10 };
@@ -513,11 +515,12 @@
     const dash = "—";
     const fmtPct = v => v == null ? dash : (v * 100).toFixed(1) + "%";
     function stationRow(r, full) {
-      const tag = `<span class="tag ${ST_TAG[r.status] || "gray"}">${r.status_label || "未知"}</span>`;
+      const ST_CN = { stuck: "读数异常", high_missing: "缺数偏多", normal: "正常" };
+      const tag = `<span class="tag ${ST_TAG[r.status] || "gray"}">${ST_CN[r.status] || "未知"}</span>`;
       const sug = r.ticket_suggest && r.ticket_suggest !== "none" ? `<span class="tag gray">${SUGGEST_CN[r.ticket_suggest] || "其他"}</span>` : `<span class="readonly-note">${dash}</span>`;
-      if (!full) return `<tr><td>站点 ${r.station_id}</td><td>${r.taz_id ?? dash}</td><td>${tag}</td><td class="num">${fmtPct(r.missing_rate)}</td><td class="num">${r.gap_days_max ?? dash}</td><td>${sug}</td></tr>`;
+      if (!full) return `<tr><td>站 ${r.station_id}</td><td>${r.taz_id ?? dash}</td><td>${tag}</td><td class="num">${fmtPct(r.missing_rate)}</td><td class="num">${r.gap_days_max ?? dash}</td><td>${sug}</td></tr>`;
       const occ = r.avg_occupancy == null ? dash : `<span class="bar-cell">${fmtPct(r.avg_occupancy)}<i><b style="width:${Math.round(r.avg_occupancy * 100)}%"></b></i></span>`;
-      return `<tr><td style="white-space:nowrap">站点 ${r.station_id}</td><td>${r.taz_id ?? dash}</td><td class="num">${r.total_piles ?? dash}</td><td class="num">${occ}</td>
+      return `<tr><td style="white-space:nowrap">站 ${r.station_id}</td><td>${r.taz_id ?? dash}</td><td class="num">${r.total_piles ?? dash}</td><td class="num">${occ}</td>
         <td class="num">${r.occupancy_rank ?? dash}</td><td class="num">${r.total_volume_kwh == null ? dash : (+r.total_volume_kwh).toLocaleString("zh-CN", { maximumFractionDigits: 1 })}</td>
         <td class="num">${fmtPct(r.missing_rate)}</td><td class="num">${r.gap_days_max ?? dash}</td><td>${tag}</td><td>${sug}</td></tr>`;
     }
@@ -538,15 +541,15 @@
         const flagged = items.filter(r => r.ticket_suggest && r.ticket_suggest !== "none")
           .sort((a, b) => (a.status === "stuck" ? 0 : 1) - (b.status === "stuck" ? 0 : 1) || (b.missing_rate || 0) - (a.missing_rate || 0));
         $("ovStationBody").innerHTML = flagged.length ? flagged.slice(0, 8).map(r => stationRow(r, false)).join("")
-          : `<tr><td colspan="6" class="empty">暂无待关注站点</td></tr>`;
+          : `<tr><td colspan="6" class="empty">暂无待关注的站</td></tr>`;
       } catch (e) {
         stCounts = null;
-        $("ovStationBody").innerHTML = `<tr><td colspan="6" class="empty">站点明细暂不可用，可在「运维工单」查看已生成工单的站点</td></tr>`;
+        $("ovStationBody").innerHTML = `<tr><td colspan="6" class="empty">站明细暂不可用，可在「运维工单」查看已开单的站</td></tr>`;
       }
       renderStationTabs();
     }
     function renderStationTabs() {
-      const tabs = [["", "全部"], ["stuck", "卡死"], ["high_missing", "高缺失"], ["normal", "正常"]];
+      const tabs = [["", "全部"], ["stuck", "读数异常"], ["high_missing", "缺数偏多"], ["normal", "正常"]];
       $("stationTabs").innerHTML = tabs.map(([k, n]) => `<div data-k="${k}" class="${k === stQ.status ? "active" : ""}">${n}${stCounts ? `<em>${stCounts[k]}</em>` : ""}</div>`).join("");
       $("stationTabs").querySelectorAll("div").forEach(d => d.onclick = () => { stQ.status = d.dataset.k; stQ.page = 1; renderStationTabs(); loadStations(); });
     }
@@ -555,9 +558,9 @@
       const qs = Object.entries(stQ).filter(([, v]) => v !== "").map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
       let d;
       try { d = await apiGet(`/api/stations?${qs}`); }
-      catch (e) { return stationEmpty("站点级质检明细暂不可用，可在「运维工单」查看已生成工单的站点"); }
+      catch (e) { return stationEmpty("异常站列表暂不可用，可在「运维工单」查看已开单的站"); }
       const items = d.items || [];
-      $("stationBody").innerHTML = items.length ? items.map(r => stationRow(r, true)).join("") : `<tr><td colspan="10" class="empty">当前筛选条件下没有站点</td></tr>`;
+      $("stationBody").innerHTML = items.length ? items.map(r => stationRow(r, true)).join("") : `<tr><td colspan="10" class="empty">当前筛选条件下没有站</td></tr>`;
       $("stationExtra").textContent = `共 ${d.total} 座`;
       pager($("stationPager"), d.total, d.page || stQ.page, d.page_size || stQ.page_size, n => { stQ.page = n; loadStations(); });
     }
@@ -643,7 +646,7 @@
         usingOffline = false;
         let mode = "";
         try { mode = ((await apiGet(`/api/health`)) || {}).mode || ""; } catch (e) { /* 健康检查失败不影响展示 */ }
-        $("srcDot").className = "dot on"; $("srcText").textContent = mode === "file" ? "数据源：本地文件 实时" : "数据源：MySQL 实时";
+        $("srcDot").className = "dot on"; $("srcText").textContent = mode === "file" ? "当前：本机文件" : "当前：MySQL";
         $("srcState").title = API_BASE;
       } catch (e) {
         usingOffline = true;
@@ -652,7 +655,7 @@
         quality = FALLBACK.quality;
         baseline = { ...FALLBACK.baseline, taz_id: taz };
         tickets = JSON.parse(JSON.stringify(FALLBACK.tickets));
-        $("srcDot").className = "dot"; $("srcText").textContent = "数据源：离线样例";
+        $("srcDot").className = "dot"; $("srcText").textContent = "当前：离线样例";
         $("srcState").title = `接口不可用：${e.message || e}`;
       }
       renderKpis(overview, zoneCount);
@@ -693,7 +696,7 @@
     /* ---------- 用户菜单 / 登录 ---------- */
     function setUser(d) {
       currentUser = { user: d.user, role: d.role };
-      const roleCn = d.role === "admin" ? "运维管理员" : "只读访客";
+      const roleCn = d.role === "admin" ? "管理员" : "访客";
       $("userName").textContent = d.user; $("popName").textContent = d.user; $("popRole").textContent = roleCn;
       $("avatar").textContent = String(d.user).slice(0, 1).toUpperCase();
       renderTickets(ticketList);
@@ -701,7 +704,7 @@
     $("userBox").onclick = e => { if (e.target.closest(".menu-pop .info")) return; $("userPop").classList.toggle("open"); };
     document.addEventListener("click", e => { if (!e.target.closest("#userBox")) $("userPop").classList.remove("open"); });
     $("menuLogin").onclick = () => { $("loginOut").textContent = ""; $("loginMask").classList.add("open"); };
-    $("menuLogout").onclick = () => { setUser({ user: "访客", role: "readonly" }); $("userName").textContent = "只读访客"; $("avatar").textContent = "访"; toast("已退出登录"); };
+    $("menuLogout").onclick = () => { setUser({ user: "访客", role: "readonly" }); $("userName").textContent = "访客"; $("avatar").textContent = "访"; toast("已退出登录"); };
     $("btnCloseLogin").onclick = () => $("loginMask").classList.remove("open");
     $("btnLogin").onclick = async () => {
       const user = $("userInput").value;
@@ -719,7 +722,7 @@
       }
       msg.className = "login-msg"; msg.textContent = "";
       $("loginMask").classList.remove("open");
-      toast(`已登录：${user}（${role === "admin" ? "运维管理员" : "只读访客"}）`);
+      toast(`已登录：${user}（${role === "admin" ? "管理员" : "访客"}）`);
     };
 
     $("btnRefresh").onclick = loadAll;
