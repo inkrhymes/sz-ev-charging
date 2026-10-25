@@ -14,7 +14,7 @@ import argparse
 import os
 import sys
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 import pandas as pd
@@ -39,6 +39,7 @@ class Result:
     actual: str
     expected: str
     message: str = ""
+    groups: list = field(default_factory=list)  # 站点级明细（如累计卡死站），写 dq_alert 时每站一行
 
 
 # ---------- 数据读取 ----------
@@ -169,6 +170,59 @@ def chk_flag_groups(df, rule, **_):
     return _r(rule, n <= mx, n, f"<={mx}", f"{col} 为真的{key}数")
 
 
+def chk_newly_flagged_groups(df, rule, prev_df=None, **_):
+    """当天 flag 为真、前一天不为真的组数（如新变卡死的站）。无前一天时跳过。"""
+    key, col = rule.get("group_by", "station_id"), rule["column"]
+    if col not in df.columns:
+        return _r(rule, True, 0, "列不存在，跳过", "skip")
+    if prev_df is None or prev_df.empty or col not in prev_df.columns:
+        return _r(rule, True, 0, "无前一天，跳过", "skip")
+    today = set(df.loc[df[col].astype(bool), key])
+    before = set(prev_df.loc[prev_df[col].astype(bool), key])
+    n, mx = len(today - before), rule.get("max_groups", 0)
+    return _r(rule, n <= mx, n, f"<={mx}", f"当天{col}为真、前一天不为真的{key}数")
+
+
+def _lake_daily_flags(rule, ds):
+    """读 lake 中 dt<=ds 的所有分区，返回 (station_id, taz_id, 该站该天 flag 是否为真) 明细。"""
+    lake = Path(os.getenv("SZ_EV_LAKE", ROOT / "data" / "lake"))
+    base = lake / rule.get("source", "dwd/charge_5min_clean")
+    key, col = rule.get("group_by", "station_id"), rule["column"]
+    parts = []
+    for d in sorted(base.glob("dt=*")):
+        dt = d.name[3:]
+        if dt > str(ds):
+            continue
+        f = read_frame(d)
+        if f.empty or col not in f.columns:
+            continue
+        g = f.groupby(key).agg(taz_id=("taz_id", "first"), flag=(col, "max")).reset_index()
+        g["dt"] = dt
+        parts.append(g)
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
+def chk_cumulative_flag_days(df, rule, ds=None, history=None, **_):
+    """截至 ds（含）累计 flag 为真天数 >= min_days 的站；明细放进 groups，写 dq_alert 时每站一行。"""
+    key, need = rule.get("group_by", "station_id"), rule["min_days"]
+    h = history if history is not None else _lake_daily_flags(rule, ds)
+    if h.empty:
+        return _r(rule, True, 0, "无历史分区，跳过", "skip")
+    agg = h[h["flag"].astype(bool)].groupby(key).agg(days=("dt", "nunique"), taz_id=("taz_id", "last"),
+                                                     first_dt=("dt", "min"), last_dt=("dt", "max"))
+    hit = agg[agg["days"] >= need].reset_index()
+    groups = [{"station_id": str(r[key]), "taz_id": None if pd.isna(r["taz_id"]) else str(int(r["taz_id"])),
+               "metric": int(r["days"]),
+               "detail": f"[告警] 站 {r[key]}（片区 {int(r['taz_id']) if not pd.isna(r['taz_id']) else '未知'}）"
+                         f"截至 {ds} 累计卡死 {int(r['days'])} 天（>= {need} 天），"
+                         f"首次 {r['first_dt']}、最近 {r['last_dt']}，建议派维修工单核查。"}
+              for _, r in hit.iterrows()]
+    res = _r(rule, not groups, len(groups), f"累计卡死>={need}天的{key}数=0",
+             f"截至 {ds} 累计 {rule['column']} 天数>={need} 的{key}数")
+    res.groups = groups
+    return res
+
+
 def chk_duplicate_key(df, rule, **_):
     n = int(df.duplicated(subset=rule["keys"]).sum())
     return _r(rule, n == 0, n, "0")
@@ -191,6 +245,8 @@ CHECKS = {
     "stuck_value": chk_stuck_value,
     "station_went_empty": chk_station_went_empty,
     "flag_groups": chk_flag_groups,
+    "newly_flagged_groups": chk_newly_flagged_groups,
+    "cumulative_flag_days": chk_cumulative_flag_days,
     "duplicate_key": chk_duplicate_key,
     "freshness": chk_freshness,
 }
@@ -262,9 +318,30 @@ def write_alerts(results, layer, ds, rules):
                 if not n:
                     cur.execute("INSERT INTO dq_alert (ds,layer,rule_name,severity,metric_value,threshold,detail)"
                                 " VALUES (%s,%s,%s,%s,%s,%s,%s)", (ds, layer, r.rule_name, r.severity, *args))
+            for r in bad:
+                write_station_alerts(cur, r, layer, ds, by_name.get(r.rule_name, {}))
     finally:
         conn.close()
     return len(bad)
+
+
+def write_station_alerts(cur, r, layer, ds, rule):
+    """站点级告警：每站一行，按 (layer, rule_name, station_id) 幂等。
+    已存在则只刷新 metric_value/threshold/detail，不动 ds（首次触发日）、status、note。返回新插入行数。"""
+    new = 0
+    thr = rule.get("min_days")
+    for g in r.groups:
+        n = cur.execute("UPDATE dq_alert SET metric_value=%s, threshold=%s, detail=%s, taz_id=%s"
+                        " WHERE layer=%s AND rule_name=%s AND station_id=%s",
+                        (g["metric"], thr, g["detail"][:500], g["taz_id"], layer, r.rule_name, g["station_id"]))
+        if not n:
+            cur.execute("INSERT INTO dq_alert (ds,layer,rule_name,severity,station_id,taz_id,metric_value,threshold,detail)"
+                        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (ds, layer, r.rule_name, r.severity, g["station_id"], g["taz_id"], g["metric"], thr,
+                         g["detail"][:500]))
+            new += 1
+    return new
+
 
 
 def write_log(results, layer, ds, run_id):

@@ -91,3 +91,82 @@ def test_flag_groups_counts_stations():
     df = pd.DataFrame({"station_id": [1, 1, 2, 3], "is_stuck": [0, 1, 1, 0]})
     r = engine.chk_flag_groups(df, {"name": "s", "type": "flag_groups", "column": "is_stuck", "max_groups": 1, "severity": "warn"})
     assert r.actual == "2" and not r.passed
+
+
+# ---------- 卡死规则（2db48a3 固定 7 天窗口口径） ----------
+def _stuck_day(stuck_ids, n_st=4):
+    return pd.DataFrame([{"station_id": s, "taz_id": 100 + s, "ts": "2022-09-02 00:00",
+                          "is_stuck": int(s in stuck_ids)} for s in range(n_st)])
+
+
+def test_dwd_rules_thresholds_are_p95():
+    rules = {r["name"]: r for r in engine.load_rules("dwd")}
+    assert rules["dwd_stuck_stations"]["max_groups"] == 221
+    assert rules["dwd_newly_stuck_stations"]["max_groups"] == 63
+    assert rules["dwd_stuck_cumulative_30d"]["min_days"] == 30
+    for n in ("dwd_stuck_stations", "dwd_newly_stuck_stations", "dwd_stuck_cumulative_30d"):
+        assert rules[n]["severity"] == "warn"
+
+
+def test_newly_flagged_groups():
+    rule = {"name": "n", "type": "newly_flagged_groups", "column": "is_stuck", "max_groups": 1, "severity": "warn"}
+    r = engine.chk_newly_flagged_groups(_stuck_day({0, 1, 2}), rule, prev_df=_stuck_day({0}))
+    assert r.actual == "2" and not r.passed
+    r = engine.chk_newly_flagged_groups(_stuck_day({0, 1}), rule, prev_df=_stuck_day({0}))
+    assert r.passed
+    assert engine.chk_newly_flagged_groups(_stuck_day({0, 1, 2}), rule).message == "skip"
+
+
+def _write_lake(tmp_path, days):
+    base = tmp_path / "dwd" / "charge_5min_clean"
+    for i, ids in enumerate(days):
+        d = base / f"dt=2022-09-{i + 1:02d}"
+        d.mkdir(parents=True)
+        _stuck_day(ids).to_parquet(d / "part.parquet")
+
+
+def test_cumulative_flag_days_per_station(tmp_path, monkeypatch):
+    _write_lake(tmp_path, [{0, 1}, {0}, {0, 2}, {0}])
+    monkeypatch.setenv("SZ_EV_LAKE", str(tmp_path))
+    rule = {"name": "c", "type": "cumulative_flag_days", "column": "is_stuck", "min_days": 3, "severity": "warn"}
+    r = engine.chk_cumulative_flag_days(None, rule, ds="2022-09-04")
+    assert not r.passed and r.actual == "1"
+    g = r.groups[0]
+    assert g["station_id"] == "0" and g["taz_id"] == "100" and g["metric"] == 4 and "累计卡死 4 天" in g["detail"]
+    # 不读 ds 之后的分区
+    r2 = engine.chk_cumulative_flag_days(None, rule, ds="2022-09-02")
+    assert r2.passed and r2.groups == []
+
+
+class _FakeCur:
+    """模拟 dq_alert：key=(layer, rule, station)。"""
+    def __init__(self):
+        self.rows = {}
+
+    def execute(self, sql, args):
+        if sql.startswith("UPDATE"):
+            metric, thr, detail, taz, layer, rule, st = args
+            row = self.rows.get((layer, rule, st))
+            if not row:
+                return 0
+            row.update(metric_value=metric, threshold=thr, detail=detail, taz_id=taz)
+            return 1
+        ds, layer, rule, sev, st, taz, metric, thr, detail = args
+        self.rows[(layer, rule, st)] = dict(ds=ds, severity=sev, taz_id=taz, metric_value=metric,
+                                            threshold=thr, detail=detail, status="open", note=None)
+        return 1
+
+
+def test_station_alerts_idempotent_keep_status():
+    cur = _FakeCur()
+    rule = {"name": "c", "min_days": 30}
+    r = engine.Result("c", "cumulative_flag_days", "warn", False, "1", "")
+    r.groups = [{"station_id": "7", "taz_id": "101", "metric": 30, "detail": "累计卡死 30 天"}]
+    assert engine.write_station_alerts(cur, r, "dwd", "2022-10-01", rule) == 1
+    row = cur.rows[("dwd", "c", "7")]
+    row.update(status="ack", note="已派单")
+    r.groups[0].update(metric=31, detail="累计卡死 31 天")
+    assert engine.write_station_alerts(cur, r, "dwd", "2022-10-02", rule) == 0
+    assert len(cur.rows) == 1
+    assert row["metric_value"] == 31 and row["status"] == "ack" and row["note"] == "已派单"
+    assert row["ds"] == "2022-10-01"
