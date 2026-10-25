@@ -193,13 +193,14 @@ def _mysql_series(taz_id):
     if taz_id is None:
         return None
     cond, args, limit = _range_args(168)
-    r = _sql("SELECT taz_id, ts_hour, occupancy, load_kw_est FROM ads_zone_occupancy_hour "
+    r = _sql("SELECT taz_id, ts_hour, occupancy, load_kw_est, power_coverage FROM ads_zone_occupancy_hour "
              f"WHERE taz_id=%s{cond} ORDER BY ts_hour{limit}", (taz_id, *args))
     if r is None:
         return None
     return {"taz_id": taz_id, "points": [
         {"taz_id": str(x["taz_id"]), "ts_hour": _ts(x["ts_hour"]), "occupancy": _num(x["occupancy"], 6),
-         "load_kw_est": _num(x["load_kw_est"], 2)} for x in r]}
+         "load_kw_est": _num(x["load_kw_est"], 2),
+         "power_coverage": _num(x.get("power_coverage"), 4)} for x in r]}
 
 
 def _mysql_baseline(taz_id):

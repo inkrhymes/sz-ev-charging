@@ -14,7 +14,7 @@ FAKE = {
                            "peak_hour": 6, "stuck_cnt": 6, "high_missing_cnt": 180}],
     "DISTINCT taz_id": [{"taz_id": "102"}, {"taz_id": "11"}],
     "FROM ads_zone_occupancy_hour WHERE": [{"taz_id": "11", "ts_hour": dt.datetime(2022, 9, 1, 0), "occupancy": Decimal("0.5"),
-                                            "load_kw_est": None}],
+                                            "load_kw_est": None, "power_coverage": 0.85}],
     "FROM ads_baseline_naive WHERE": [{"taz_id": "11", "ts_hour": dt.datetime(2022, 9, 1, 1), "y_true": Decimal("0.5"),
                                        "y_hat_lag1": Decimal("0.4"), "abs_err": Decimal("0.1")}],
     "LIMIT 1": [{"taz_id": "11"}],
@@ -55,7 +55,7 @@ def test_mysql_mode_fields(app_mod, monkeypatch):
     assert o["station_cnt"] == 1682 and o["avg_occupancy"] == 0.3031
     assert data(c.get("/api/zones")) == ["11", "102"]
     p = data(c.get("/api/zone/series?taz_id=11"))["points"][0]
-    assert set(p) == {"taz_id", "ts_hour", "occupancy", "load_kw_est"} and p["ts_hour"] == "2022-09-01 00:00:00"
+    assert set(p) == {"taz_id", "ts_hour", "occupancy", "load_kw_est", "power_coverage"} and p["power_coverage"] == 0.85 and p["ts_hour"] == "2022-09-01 00:00:00"
     b = data(c.get("/api/baseline"))
     assert b["taz_id"] == "11" and {"metrics", "forecast_window"} <= set(b)
     assert {"taz_id", "ts_hour", "y_true", "y_hat_lag1", "abs_err", "y_hat_lgbm", "abs_err_lgbm"} <= set(b["points"][0])

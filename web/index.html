@@ -228,7 +228,7 @@
         <div class="ops"><button class="btn" id="btnReset">重置</button><button class="btn primary" id="btnRefresh">查询</button></div>
       </div>
       <div class="grid">
-        <div class="card col-24"><div class="card-head"><div class="card-title">占用率与估算负荷<span class="tip" data-tip="按「在用桩数 × 单桩功率」估算，只看趋势"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="seriesExtra"></div></div>
+        <div class="card col-24"><div class="card-head"><div class="card-title">占用率与估算负荷<span class="tip" data-tip="按「占用率 × 片区里各站充电桩的额定功率之和」估算，只看趋势；有的站没有功率数据，就只按有数据的桩算"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="seriesExtra"></div></div>
           <div class="card-body"><div id="chartSeries" class="chart-main"></div></div></div>
         <div class="card col-24"><div class="card-head"><div class="card-title">小时明细</div><div class="card-extra" id="seriesCount"></div></div>
           <div class="card-body"><table><thead><tr><th>时间</th><th>片区</th><th class="num">占用率</th><th class="num">估算负荷（kW）</th></tr></thead><tbody id="seriesBody"></tbody></table><div class="pager" id="seriesPager"></div></div></div>
@@ -497,11 +497,13 @@
       el.querySelectorAll(".pg").forEach(p => p.onclick = () => { const n = +p.dataset.p; if (n >= 1 && n <= pages && n !== page) onGo(n); });
     }
 
+    // 片区里只有部分桩有功率数据时，在负荷旁边小字注明
+    const covNote = c => c != null && c < 0.995 ? `<div style="font-size:12px;color:var(--text-3)" title="片区里有些桩没有功率数据，负荷只按有数据的桩算，实际会更高">按 ${Math.round(c * 100)}% 的充电桩估算</div>` : "";
     function renderSeriesTable() {
       const size = 10, rows = seriesPts.slice((seriesPage - 1) * size, seriesPage * size);
       $("seriesCount").textContent = `${seriesPts.length} 条`;
       $("seriesBody").innerHTML = rows.length ? rows.map(p => `<tr><td class="num" style="text-align:left">${p.ts_hour.slice(0, 16)}</td><td>${seriesTaz}</td>
-        <td class="num">${(p.occupancy * 100).toFixed(1)}%</td><td class="num">${p.load_kw_est == null ? '<span style="color:var(--text-3)">暂无</span>' : (+p.load_kw_est).toFixed(1)}</td></tr>`).join("")
+        <td class="num">${p.occupancy == null ? '<span style="color:var(--text-3)">暂无</span>' : (p.occupancy * 100).toFixed(1) + "%"}</td><td class="num">${p.load_kw_est == null ? '<span style="color:var(--text-3)">暂无</span>' : (+p.load_kw_est).toFixed(1) + covNote(p.power_coverage)}</td></tr>`).join("")
         : `<tr><td colspan="4" class="empty">所选条件下暂无数据</td></tr>`;
       pager($("seriesPager"), seriesPts.length, seriesPage, size, n => { seriesPage = n; renderSeriesTable(); });
     }
