@@ -87,3 +87,7 @@
 - LSTM/ARIMA/XGBoost 训练结果表（半个月不做真模型）
 - 电网 EMS / 真实人员排班
 - Hive/Spark 外部表
+
+## 6. 与 API MOCK 对齐提醒
+
+真实演示子集为 **25 站**（卡死 3／高缺失 5／正常 17）。`api/app.py` MOCK 里若仍写 24/2/3，入库后关 MOCK 或改样例数字。
