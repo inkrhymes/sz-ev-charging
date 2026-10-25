@@ -58,7 +58,7 @@ flowchart LR
 - 每条规则的结果都写入 MySQL 表 `dq_run_log`（ds、层、规则、级别、实测值、阈值、是否通过、运行时间），数据质量页与告警页可以直接读。
 
 ## 6. 预测
-LightGBM 预测片区下一小时占用率，特征为时间、滞后、片区特征；按时间切分训练/测试，与「用上一小时」的简单方法比较 MAE，结果写入 MySQL 供「和上小时比」页面使用。
+LightGBM 预测片区下一小时占用率，和「直接用上一小时」比较，最后 28 天测试 MAE 0.0255 对 0.0285。细节和接口字段见 8.3。
 
 ## 7. 服务
 Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + ECharts 的管理后台。
@@ -85,7 +85,35 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 - 耗时基线见 `docs/perf/spark_baseline.md`，设计说明见 `docs/warehouse_design.md`。
 
 ### 8.3 测试 / CI 与预测（小粉）
-> 【待小粉补充】pytest 范围、GitHub Actions 流程、`forecast/` 训练与评估方式、MAE 结果。
+**测试**
+- 全部用 pytest，放在 `tests/`，本地 `pip install -r requirements-dev.txt` 后在仓库根目录跑 `pytest -q`。
+- 覆盖：清洗和质检规则（用自己造的小数据跑 `etl/clean_to_dwd.py`）；接口（Flask 自带的测试客户端，文件模式下的总览、片区、站点、和上小时比、工单、告警、登录，数字和验收清单一致）；MySQL 模式（用假的查库函数替代真库，检查字段和文件模式一样，连不上时退回文件）；预测特征（只用过去的数据、不跨片区、按时间切分）；调度和质检引擎（`tests/orchestration/`，没装 Airflow 的那一项会跳过）。
+- 防回归：工单和告警改状态只认登录 token，访客 403、没登录或 token 不对 401，开了 `ALERT_DB=mysql` 也一样，而且没权限时不会写库；导入 app 时地图、告警、工单路由都要在（防止以前的 405 再出现）。
+- 设 `SZ_TEST_MYSQL=1` 时会额外连真实 `sz_ev` 做冒烟测试，平时跳过。
+
+**CI**
+- `.github/workflows/ci.yml`：推到 main 或开 PR 时自动跑全部 pytest 和一次预测冒烟训练；另一个任务用 `scripts/start.sh` 起整套 Docker 服务，探一下关键接口（这个任务失败不挡合并）。
+
+**预测（`forecast/`）**
+- 目标：预测每个片区下一小时的平均占用率，对照的是最简单的做法「直接用上一小时的值」（lag1）。
+- 数据：读小紫的 `dwd/charge_5min_clean/dt=*/`，一天一天读进来马上按「片区 + 小时」求平均，不会把 8768 万行一次装进内存。入口只有一个函数 `load_zone_hour`，也能读演示用的 CSV；少于 7 天会直接报错。
+- 用到的信息：几点、星期几、是不是周末；1、2、24、168 小时前的值；过去 168 小时的平均；上一小时比再前一小时变了多少；过去 4 周同一时刻的平均；片区编号。全都只看预测时刻之前的数据。
+- 怎么评：按时间切开，2023-02-01 之前训练，最后 28 天（2 月 1–28 日）测试，331 个片区。
+- 结果：
+
+| 方法 | 平均误差 MAE | 大误差加重的 RMSE |
+|---|---|---|
+| 直接用上一小时 | 0.02849 | 0.05778 |
+| LightGBM | 0.02548 | 0.04614 |
+
+  MAE 低约 11%，RMSE 低约 20%。331 个片区里，MAE 更低的有 174 个，RMSE 更低的有 289 个。好处主要在忙闲突然变化的时候；本来就平稳的片区，上一小时的值已经很准，两者差不多。
+- 输出：`forecast/metrics.json`（整体和每个片区的误差）、`forecast/predictions.csv`（为了文件小，只留 2 月 27–28 日两天的逐小时预测）。
+- 复现：`python -m forecast.train --source data/lake/dwd/charge_5min_clean --test-days 28`，约 4 分钟。
+
+**预测接口（`GET /api/baseline`）**
+- 每个点在原来的 `y_true`、`y_hat_lag1`、`abs_err` 之外多两个字段：`y_hat_lgbm`（LightGBM 预测值）、`abs_err_lgbm`（和真实值差多少）。不在预测那两天里的点，这两个字段是 null。
+- 顶层多 `metrics`（`mae_lgbm`、`mae_lag1`、`rmse_lgbm`、`rmse_lag1`、`split_ts`，`split_ts` 是 2023-02-01，表示误差按 28 天算）和 `forecast_window`（有预测的起止时间，即 2 月 27–28 日），前端据此跳到有预测的日期。
+- 文件模式（默认）读 `forecast/predictions.csv` 和 `metrics.json`；`API_SOURCE=mysql` 时其余数字读 `sz_ev` 的 ads 表，预测字段照样补上，字段名两种模式一样。预测文件不在时这些字段为空，页面不画预测线，不报错。
 
 ### 8.4 接口与前端（小黑 / 小黄）
 > 【待小黑补充】接口与 MySQL ads 表的部分。

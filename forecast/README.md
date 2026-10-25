@@ -41,16 +41,10 @@ LightGBM 整体 MAE 降低约 10.6%，RMSE 降低约 20.1%。分片区看：331 
 优势主要在大波动时刻（早晚高峰切换），平稳片区里 lag-1 本身已经很准，两者接近。训练集 1,151,449 行。
 `predictions.csv` 只保留测试集最后 2 天（`--pred-keep-days`），完整逐片区指标见 `metrics.json`。
 
-早期演示子集（18 片区、14 天）上 LightGBM MAE 不如 lag-1（0.0339 vs 0.0277），数据量不足以学到周规律；以上全量结果取代它。
+## 历史记录：早期演示结果（已作废）
 
-## 建议的接口字段（暂不接入，供 @小黄 / API 参考）
+最早只在随仓演示数据上跑过（18 个片区、14 天）。那时 LightGBM 的 MAE 反而不如上一小时（0.0339 对 0.0277），因为数据太少学不到一周的规律。这个结果只留作记录，不要再引用，以上面的全量结果为准。
 
-`GET /api/baseline?taz_id=&from=&to=` 每个点在现有 `y_true / y_hat_lag1 / abs_err` 之外增加：
+## 接口字段（已接入 `/api/baseline`）
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `y_hat_lgbm` | float \| null | LightGBM 预测；不在测试/预测区间时为 null |
-| `abs_err_lgbm` | float \| null | `|y_true - y_hat_lgbm|` |
-
-响应 `data` 顶层增加 `metrics: {"lag1": {"mae","rmse"}, "lgbm": {"mae","rmse"}, "split_ts": "..."}`（取自 metrics.json 对应片区）。
-API 端实现方式：读 `forecast/predictions.csv`（后续可换成 MySQL `ads_forecast_zone_hour` 表），按 taz_id+ts 关联。
+每个点多 `y_hat_lgbm`、`abs_err_lgbm`（不在预测的 2 月 27–28 日内为 null）；顶层多 `metrics`（`mae_lgbm`、`mae_lag1`、`rmse_lgbm`、`rmse_lag1`、`split_ts`）和 `forecast_window`。文件模式和 `API_SOURCE=mysql` 模式字段一样。详细说明见 `docs/architecture.md` 8.3 节。
