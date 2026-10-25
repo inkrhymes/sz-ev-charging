@@ -40,7 +40,7 @@ UrbanEV 原始 5 分钟 CSV（1,682 站 / 181 天）
 | 选址建议 | 11 个片区建议加桩，共 15 根；排第一的是 TAZ 645（建议加 5 根） | MySQL `ads_zone_site_suggest`，`/api/site/suggest` |
 | 接口压测（50 用户，4 个 worker） | 常规负载 P50 12 ms → 开 Redis 后 3 ms；不限速时吞吐约 329 → 1387 QPS，P50 150 → 33 ms，错误率 0；缓存命中率约 88% | `docs/perf/api_loadtest.md` |
 | 覆盖索引 | 查询约 220 ms → 约 2 ms | `docs/perf/spark_baseline.md` |
-| 测试 | CI 文件模式 140 个通过、6 个跳过（Python 3.11 / 3.12），页面检查 13 个通过 | GitHub Actions |
+| 测试 | CI 文件模式 145 个通过、6 个跳过（Python 3.11 / 3.12），页面检查 13 个通过 | GitHub Actions run 40172071642（main） |
 
 ## 3. 运行
 
@@ -73,11 +73,14 @@ python3 scripts/smoke_live.py                          # 线上冒烟检查（8 
 | 基线 | ![baseline](docs/screenshots/baseline.png) |
 | 基线与预测 | ![baseline_forecast](docs/screenshots/baseline_forecast.png) |
 | 地图 | ![map](docs/screenshots/map.png) |
+| 选址补桩（11 个片区共建议加 15 根桩，排第一的是 TAZ 645） | ![site_suggest](docs/screenshots/site_suggest.png) |
 | 告警 | ![alerts](docs/screenshots/alerts.png) |
 | 已关闭告警 | ![alerts_closed](docs/screenshots/alerts_closed.png) |
 | 数据质量 | ![quality](docs/screenshots/quality.png) |
+| 调度运行（每天每一步的耗时和状态） | ![runs_day](docs/screenshots/runs_day.png) |
 | 工单 | ![tickets](docs/screenshots/tickets.png) |
 | 工单（管理员，1280 宽） | ![tickets_admin_1280](docs/screenshots/tickets_admin_1280.png) |
+| 工单时间线（WO-0007 派单后等了 27 分钟才开始处理，处理用了 2.6 小时） | ![ticket_timeline](docs/screenshots/ticket_timeline.png) |
 
 ## 5. 相关文档
 
