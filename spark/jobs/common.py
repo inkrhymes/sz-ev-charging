@@ -9,11 +9,31 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _bootstrap() -> None:
+    """调度器可能用不含 pyspark 的解释器调用本脚本：自动切到 SZ_PY（默认 /workspace/sz-venv-spark）。"""
+    os.environ.setdefault("JAVA_HOME", "/workspace/jdk")
+    os.environ["PATH"] = f"{os.environ['JAVA_HOME']}/bin:" + os.environ.get("PATH", "")
+    try:
+        import pyspark  # noqa: F401
+    except ImportError:
+        import sys
+        py = os.environ.get("SZ_PY", "/workspace/sz-venv-spark/bin/python")
+        if os.path.exists(py) and not os.environ.get("_SZ_REEXEC"):
+            os.environ["_SZ_REEXEC"] = "1"
+            os.execv(py, [py] + sys.argv)
+        raise
+
+
+_bootstrap()
 SPARK_DIR = ROOT / "spark"
 WAREHOUSE = Path(os.environ.get("SZ_WAREHOUSE", ROOT / "data" / "warehouse"))
 METASTORE = Path(os.environ.get("SZ_METASTORE", SPARK_DIR / "_metastore"))
-DEFAULT_ODS_INPUT = os.environ.get("SZ_ODS_INPUT", str(ROOT / "data" / "lake" / "ods" / "charge_5min"))
-STATION_INFO_LAKE = ROOT / "data" / "lake" / "ods" / "station_info"
+# 湖根目录：环境变量 SZ_EV_LAKE（与 etl/full_pipeline.py 一致），默认仓库内 data/lake
+LAKE = Path(os.environ.get("SZ_EV_LAKE", ROOT / "data" / "lake"))
+DEFAULT_ODS_INPUT = os.environ.get("SZ_ODS_INPUT", str(LAKE / "ods" / "charge_5min"))
+STATION_INFO_LAKE = LAKE / "ods" / "station_info"
 STATION_INFO_URBANEV = Path(os.environ.get(
     "SZ_STATION_INFO_RAW",
     "/workspace/thesis_ev_data/gdrive/UrbanEV/UrbanEVDataset/20220901-20230228_station-raw/station_information.csv"))
@@ -88,4 +108,4 @@ class Perf:
 
 def in_list(dates: list[str]) -> str:
     return ",".join(f"'{d}'" for d in dates)
-DEFAULT_DWD_LAKE = os.environ.get("SZ_DWD_LAKE", str(ROOT / "data" / "lake" / "dwd" / "charge_5min_clean"))
+DEFAULT_DWD_LAKE = os.environ.get("SZ_DWD_LAKE", str(LAKE / "dwd" / "charge_5min_clean"))

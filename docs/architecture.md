@@ -74,7 +74,15 @@ Flask 只读 MySQL 中的 ads 表与 `dq_run_log`，前端为原生 HTML/JS + EC
 - 调度调用：`SZ_EV_LAKE=/workspace/sz-ev-charging/data/lake python etl/full_pipeline.py --start YYYY-MM-DD --end YYYY-MM-DD --layer ods|dwd|all`（单日可用 `--ds`）。站点维表：`data/lake/ods/station_info/part-0.parquet`。
 
 ### 8.2 Spark / Hive 离线数仓（小黑）
-> 【待小黑补充】ods/dwd/ads 的 Spark SQL 作业路径与参数（约定 `--ds`）、Metastore 配置、driver 内存、写回 MySQL 的表与索引、查询优化前后耗时。
+- 调度入口（与 `orchestration/tasks.py` 对齐）：
+  - `spark/jobs/ads_build.py --ds D`（也支持 `--start/--end`）：把 `$SZ_EV_LAKE/dwd/charge_5min_clean` 注册为 Hive 外表 `dwd.ext_charge_5min_clean`（dt 分区，MSCK REPAIR），不再重做清洗；生成 `dwd.zone_hour`、`ads.*`，并写出 `$SZ_EV_LAKE/ads/zone_hour/dt=D/`（taz_id, ts_hour, occupancy_avg, busy_sum, piles_sum, station_cnt, center_lon, center_lat）和 `ads/zone_daily/dt=D/`。
+  - `spark/jobs/export_ads_mysql.py --ds D [--dry-run]`：回写 MySQL `ads_city_overview / ads_zone_occupancy_hour / ads_baseline_naive / ads_zone_daily / dim_station / ads_quality_summary`。
+- 独立链路：`spark/run_range.sh --start D1 --end D2 [--from-lake-dwd] [--dry-run]`，依次跑 ods_load → dwd_clean → ads_metrics。
+- 幂等：Hive 表按 dt 分区，动态分区 INSERT OVERWRITE；湖输出按分区覆盖；MySQL 按日期 DELETE+INSERT，不分区表 REPLACE。
+- Metastore：内嵌 Derby（`spark/conf/hive-site.xml`，配置里附 MySQL Metastore 示例），同一时刻只允许一个作业进程。
+- 资源：`local[2]`，driver 2g（`SZ_DRIVER_MEM` 可改）。
+- 新表 DDL 在 `sql/ads/04_ads_zone_daily_dim_station.sql`：ads_zone_daily 主键 (dt, taz_id)，dim_station 主键 station_id。
+- 耗时基线见 `docs/perf/spark_baseline.md`，设计说明见 `docs/warehouse_design.md`。
 
 ### 8.3 测试 / CI 与预测（小粉）
 > 【待小粉补充】pytest 范围、GitHub Actions 流程、`forecast/` 训练与评估方式、MAE 结果。

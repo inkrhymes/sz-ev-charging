@@ -29,6 +29,20 @@ def main() -> None:
     dl = in_list(dates)
     spark = spark_session("dwd_clean")
     perf = Perf("dwd_clean", dates)
+    ensure_dwd_tables(spark)
+
+    t = time.time()
+    if a.from_lake_dwd:
+        load_external_dwd(spark, a.dwd_input, dates)
+    else:
+        clean(spark, dl)
+    n = spark.sql(f"SELECT COUNT(*) FROM dwd.station_5min_clean WHERE dt IN ({dl})").first()[0]
+    perf.step("station_5min_clean" + ("(external)" if a.from_lake_dwd else ""), n, t)
+    aggregate(spark, perf, dates, dl)
+    spark.stop()
+
+
+def ensure_dwd_tables(spark) -> None:
     spark.sql("CREATE DATABASE IF NOT EXISTS dwd")
     spark.sql("""
       CREATE TABLE IF NOT EXISTS dwd.station_5min_clean (
@@ -47,15 +61,6 @@ def main() -> None:
         stuck_flag TINYINT, outlier_rows BIGINT, max_missing_run BIGINT, ticket_suggest STRING)
       PARTITIONED BY (dt STRING) STORED AS PARQUET""")
 
-    t = time.time()
-    if a.from_lake_dwd:
-        load_external_dwd(spark, a.dwd_input, dates)
-    else:
-        clean(spark, dl)
-    n = spark.sql(f"SELECT COUNT(*) FROM dwd.station_5min_clean WHERE dt IN ({dl})").first()[0]
-    perf.step("station_5min_clean" + ("(external)" if a.from_lake_dwd else ""), n, t)
-    aggregate(spark, perf, dates, dl)
-    spark.stop()
 
 
 DWD_COLS = {"station_id": "string", "ts": "timestamp", "busy": "double", "idle": "double",
@@ -107,13 +112,13 @@ def clean(spark, dl: str) -> None:
       FROM v_base b JOIN v_stat s ON b.station_id=s.station_id AND b.dt=s.dt""")
 
 
-def aggregate(spark, perf, dates, dl) -> None:
+def aggregate(spark, perf, dates, dl, src: str = "dwd.station_5min_clean") -> None:
     t = time.time()
     spark.sql(f"""
       INSERT OVERWRITE TABLE dwd.zone_hour PARTITION (dt)
       SELECT i.taz_id, date_trunc('HOUR', c.ts) AS ts_hour, AVG(c.occupancy), SUM(c.busy),
              SUM(c.total_piles), COUNT(DISTINCT c.station_id), SUM(i.rated_power_kw), c.dt
-      FROM dwd.station_5min_clean c JOIN ods.station_info i ON c.station_id=i.station_id
+      FROM {src} c JOIN ods.station_info i ON c.station_id=i.station_id
       WHERE c.dt IN ({dl}) AND c.is_row_missing=0
       GROUP BY i.taz_id, date_trunc('HOUR', c.ts), c.dt""")
     n = spark.sql(f"SELECT COUNT(*) FROM dwd.zone_hour WHERE dt IN ({dl})").first()[0]
@@ -127,7 +132,7 @@ def aggregate(spark, perf, dates, dl) -> None:
         SELECT station_id, dt, is_row_missing, is_stuck, is_outlier,
                ROW_NUMBER() OVER (PARTITION BY station_id, dt ORDER BY ts)
              - ROW_NUMBER() OVER (PARTITION BY station_id, dt, is_row_missing ORDER BY ts) AS grp
-        FROM dwd.station_5min_clean WHERE dt IN ({dl})),
+        FROM {src} WHERE dt IN ({dl})),
       runs AS (SELECT station_id, dt, MAX(n) AS max_run FROM (
                  SELECT station_id, dt, grp, COUNT(*) n FROM r WHERE is_row_missing=1 GROUP BY station_id, dt, grp) x
                GROUP BY station_id, dt),

@@ -20,10 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spark.jobs.common import ROOT, Perf, date_args, in_list, resolve_dates, spark_session  # noqa: E402
 
 HIGH_MISSING_THR = 0.30
-EXPORT = ROOT / "data" / "lake" / "export" / "ads"
+EXPORT = Path(os.environ.get("SZ_ADS_EXPORT", ROOT / "data" / "lake" / "export" / "ads"))
 
 
-def build(spark, perf, dates, dl):
+def build(spark, perf, dates, dl, src: str = "dwd.station_5min_clean"):
     spark.sql("CREATE DATABASE IF NOT EXISTS ads")
     spark.sql("""CREATE TABLE IF NOT EXISTS ads.city_overview (station_cnt BIGINT, zone_cnt BIGINT,
       avg_occupancy DOUBLE, peak_hour INT, stuck_cnt BIGINT, high_missing_cnt BIGINT)
@@ -90,7 +90,7 @@ def build(spark, perf, dates, dl):
       WITH w AS (SELECT station_id,
                         CASE WHEN SUM(CASE WHEN is_row_missing=0 AND busy IS NOT NULL THEN 1 ELSE 0 END) >= 12
                               AND COUNT(DISTINCT CASE WHEN is_row_missing=0 THEN busy END) = 1 THEN 1 ELSE 0 END st
-                 FROM dwd.station_5min_clean GROUP BY station_id),
+                 FROM {src} GROUP BY station_id),
       s AS (SELECT q.station_id, SUM(q.rows) r, SUM(q.missing_rows) m, MAX(w.st) st
                  FROM dwd.quality_station_day q JOIN w ON q.station_id=w.station_id GROUP BY q.station_id)
       SELECT 'station_cnt', CAST(COUNT(*) AS DOUBLE), '已入仓站点数' FROM s
@@ -128,13 +128,16 @@ def export(spark, perf, dates, dl, dry_run: bool):
         t = time.time()
         sdf = spark.sql(sql.format(dl=dl))
         cols = sdf.columns
-        rows = [tuple(r) for r in sdf.collect()]  # ads 结果量小；避免 toPandas（py3.13 下 pyspark 3.5 依赖 distutils）
+        # 流式拉取（toLocalIterator）避免 driver 一次性持有全量；不用 toPandas（py3.13 下 pyspark 3.5 依赖 distutils）
+        it = (tuple(r) for r in sdf.toLocalIterator())
         if dry_run:
             EXPORT.mkdir(parents=True, exist_ok=True)
             out = EXPORT / f"{table}_{dates[0]}_{dates[-1]}.csv"
             with out.open("w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f); w.writerow(cols); w.writerows(rows)
-            perf.step(f"export:{table}(dry-run)", len(rows), t, file=str(out.relative_to(ROOT)))
+                w = csv.writer(f); w.writerow(cols); n = 0
+                for r in it:
+                    w.writerow(r); n += 1
+            perf.step(f"export:{table}(dry-run)", n, t, file=str(out))
             continue
         with conn.cursor() as cur:
             if date_expr:
@@ -143,10 +146,15 @@ def export(spark, perf, dates, dl, dry_run: bool):
             else:
                 verb = "REPLACE"
             ph = ",".join(["%s"] * len(cols))
-            for i in range(0, len(rows), 5000):
-                cur.executemany(f"{verb} INTO {table} ({','.join(cols)}) VALUES ({ph})", rows[i:i + 5000])
+            n, buf = 0, []
+            for r in it:
+                buf.append(r)
+                if len(buf) >= 5000:
+                    cur.executemany(f"{verb} INTO {table} ({','.join(cols)}) VALUES ({ph})", buf); n += len(buf); buf = []
+            if buf:
+                cur.executemany(f"{verb} INTO {table} ({','.join(cols)}) VALUES ({ph})", buf); n += len(buf)
         conn.commit()
-        perf.step(f"mysql:{table}", len(rows), t)
+        perf.step(f"mysql:{table}", n, t)
     if conn:
         conn.close()
 
