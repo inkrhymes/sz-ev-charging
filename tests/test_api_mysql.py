@@ -57,7 +57,8 @@ def test_mysql_mode_fields(app_mod, monkeypatch):
     p = data(c.get("/api/zone/series?taz_id=11"))["points"][0]
     assert set(p) == {"taz_id", "ts_hour", "occupancy", "load_kw_est"} and p["ts_hour"] == "2022-09-01 00:00:00"
     b = data(c.get("/api/baseline"))
-    assert b["taz_id"] == "11" and set(b["points"][0]) == {"taz_id", "ts_hour", "y_true", "y_hat_lag1", "abs_err"}
+    assert b["taz_id"] == "11" and {"metrics", "forecast_window"} <= set(b)
+    assert {"taz_id", "ts_hour", "y_true", "y_hat_lag1", "abs_err", "y_hat_lgbm", "abs_err_lgbm"} <= set(b["points"][0])
     assert data(c.get("/api/quality"))[0] == {"metric": "row_missing_rate", "value": 0.1142, "note": "x"}
 
 

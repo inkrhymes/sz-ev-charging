@@ -448,7 +448,9 @@ def _forecast_window():
 def baseline():
     taz_id = request.args.get("taz_id")
     if use_mysql() and (r := _mysql_baseline(taz_id)) is not None:
-        return ok(r)
+        preds = _forecast_preds()
+        return ok({**r, "points": _with_lgbm(r["points"], preds),
+                   "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
     if use_file():
         rows = _zone_rows()
         if not taz_id:
