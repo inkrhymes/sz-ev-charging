@@ -78,11 +78,14 @@ python3 scripts/smoke_live.py                          # 线上冒烟检查（8 
 | 告警 | ![alerts](docs/screenshots/alerts.png) |
 | 已关闭告警 | ![alerts_closed](docs/screenshots/alerts_closed.png) |
 | 数据质量 | ![quality](docs/screenshots/quality.png) |
+| 数据质量（清洗前后对比） | ![quality_before_after](docs/screenshots/quality_before_after.png) |
 | 调度运行（每天每一步的耗时和状态） | ![runs_day](docs/screenshots/runs_day.png) |
 | 工单 | ![tickets](docs/screenshots/tickets.png) |
 | 工单（管理员，1280 宽） | ![tickets_admin_1280](docs/screenshots/tickets_admin_1280.png) |
 | 工单时间线（WO-0007 派单后等了 27 分钟才开始处理，处理用了 2 小时 45 分钟） | ![ticket_timeline](docs/screenshots/ticket_timeline.png) |
 | 数据关系（六列分层，点节点标亮上下游） | ![lineage](docs/screenshots/lineage.png) |
+| 实时占用回放 | ![realtime](docs/screenshots/realtime.png) |
+| 实时回放关键帧（约第 5 / 90 / 170 帧） | ![realtime_f5](docs/screenshots/realtime_f5.png) ![realtime_f90](docs/screenshots/realtime_f90.png) ![realtime_f170](docs/screenshots/realtime_f170.png) |
 
 实时页回放录屏（2022-09-02，288 倍速，3 分钟）：[docs/media/realtime_replay.mp4](docs/media/realtime_replay.mp4)
 
