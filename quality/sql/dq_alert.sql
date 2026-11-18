@@ -15,5 +15,6 @@ CREATE TABLE IF NOT EXISTS dq_alert (
   created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_ds_status (ds, status),
-  KEY idx_rule (rule_name)
+  KEY idx_rule (rule_name),
+  KEY idx_created_at_id (created_at, alert_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -105,8 +105,20 @@ def test_patch_role_from_token(client, path, status):
 
 
 def test_cors_preflight(client):
-    r = client.open("/api/tickets", method="OPTIONS")
-    assert r.status_code in (200, 204) and r.headers["Access-Control-Allow-Origin"] == "*"
+    r = client.open("/api/tickets", method="OPTIONS", headers={
+        "Origin": "http://127.0.0.1:5096",
+        "Access-Control-Request-Method": "PATCH",
+        "Access-Control-Request-Headers": "authorization,content-type",
+    })
+    assert r.status_code in (200, 204)
+    assert r.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5096"
+    assert "Authorization" in r.headers["Access-Control-Allow-Headers"]
+    assert "PATCH" in r.headers["Access-Control-Allow-Methods"]
+
+
+def test_cors_rejects_unlisted_origin(client):
+    r = client.get("/api/health", headers={"Origin": "https://untrusted.example"})
+    assert "Access-Control-Allow-Origin" not in r.headers
 
 
 def test_dashboard_served(client):
@@ -186,6 +198,8 @@ def test_ticket_from_alert(client):
     d = r.get_json()["data"]
     assert d["ticket"]["alert_id"] == a["alert_id"] and d["alert"]["status"] == "ack"
     assert client.post("/api/tickets", json=body, headers=ADMIN).status_code == 409
+    missing = client.post("/api/tickets", json={"station_id": a["station_id"], "alert_id": 999999999}, headers=ADMIN)
+    assert missing.status_code == 404 and missing.get_json()["ok"] is False
     assert any(t.get("alert_id") == a["alert_id"] for t in client.get("/api/tickets").get_json()["data"])
 
 
@@ -207,3 +221,19 @@ def test_db_switch_follows_api_source(monkeypatch):
 def test_series_load_not_fabricated(client):
     pts = client.get("/api/zone/series?taz_id=1068").get_json()["data"]["points"]
     assert all(p["load_kw_est"] is None for p in pts)
+
+
+
+def test_demo_admin_auth_can_be_disabled(client, monkeypatch):
+    monkeypatch.setenv("AUTH_DEMO_ENABLED", "0")
+    assert data(client.post("/api/auth/login", json={"role": "readonly"}))["token"] == "demo-readonly"
+    assert client.post("/api/auth/login", json={"role": "admin"}).status_code == 503
+    r = client.patch("/api/tickets/1", json={"status": "done"}, headers=ADMIN)
+    assert r.status_code == 503 and r.get_json()["ok"] is False
+
+
+def test_write_routes_reject_non_object_json_and_bad_ids(client):
+    assert client.post("/api/tickets", json=["not", "an", "object"], headers=ADMIN).status_code == 400
+    assert client.post("/api/tickets", json={"station_id": "1554", "alert_id": "not-an-int"}, headers=ADMIN).status_code == 400
+    assert client.patch("/api/tickets/1", json={"status": []}, headers=ADMIN).status_code == 400
+    assert client.patch("/api/alerts/1", json={"status": "ack", "note": []}, headers=ADMIN).status_code == 400

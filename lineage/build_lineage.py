@@ -8,7 +8,8 @@
     同一条 SQL 里既写又读，就按这条 SQL 连边；字典 {"mysql表": "SELECT ... FROM hive表"} 按键值连边；
     其余按「脚本读到的表 × 脚本写的表」连边。f-string 动态表名（DELETE FROM {t}）时，
     把脚本里出现的整串 MySQL 表名都当成写入目标。
-  - API：api/app.py、api/ops.py 的路由函数，连同它调用的模块内函数和常量，里面出现的 MySQL 表名算读；
+  - API：api/app.py、api/ops.py、api/routes/*.py 的路由函数；既支持装饰器路由，也支持
+    app.add_url_rule() 集中注册。会跨模块跟踪 api.routes 对 app.py 共享 helper 的调用，里面出现的 MySQL 表名算读；
     非 GET 路由里的 UPDATE/INSERT 算写。
 手工补充：lineage/overrides.yml（数据湖路径、原始文件、脚本所属任务）。
 
@@ -123,7 +124,8 @@ def _module_index(tree):
     return idx
 
 
-def _routes(tree):
+def _routes(tree, idx):
+    """Yield (path, method, view function) from decorator or centralized registration routes."""
     for n in ast.walk(tree):
         if not isinstance(n, ast.FunctionDef):
             continue
@@ -139,36 +141,84 @@ def _routes(tree):
                     method = "GET" if not ms else ast.literal_eval(ms[0].value)[0]
                 yield path, method, n
 
+    # 模块化路由使用 app.add_url_rule(..., view_func=name, methods=[...])，保持原 endpoint 名称。
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call) or not isinstance(n.func, ast.Attribute) or n.func.attr != "add_url_rule":
+            continue
+        if not n.args or not isinstance(n.args[0], ast.Constant) or not isinstance(n.args[0].value, str):
+            continue
+        path = n.args[0].value
+        if "<path:" in path or not path.startswith("/api/"):
+            continue
+        view_kw = next((k.value for k in n.keywords if k.arg == "view_func"), None)
+        if not isinstance(view_kw, ast.Name):
+            continue
+        fn = idx.get(view_kw.id)
+        if fn is None:
+            continue
+        methods_kw = next((k.value for k in n.keywords if k.arg == "methods"), None)
+        methods = ast.literal_eval(methods_kw) if methods_kw is not None else ["GET"]
+        for method in methods:
+            yield path, method, fn
+
 
 def scan_api(my: set[str]):
-    """返回 {(path, method): (reads, writes)}"""
+    """返回 {(path, method): (reads, writes)}，支持跨 api/routes -> app.py helper 跟踪。"""
     out = {}
-    for rel in API_FILES:
-        tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+    api_paths = [ROOT / rel for rel in API_FILES]
+    route_dir = ROOT / "api" / "routes"
+    if route_dir.exists():
+        api_paths += sorted(route_dir.glob("*.py"))
+
+    modules = []
+    for path in api_paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         idx, skip = _module_index(tree), _docstrings(tree)
-        # 嵌套函数（ops.register 里定义的）也能被同文件引用
         for n in ast.walk(tree):
             if isinstance(n, ast.FunctionDef):
                 idx.setdefault(n.name, n)
-        for path, method, fn in _routes(tree):
-            seen, todo, strs = set(), [fn], []
+        modules.append((path, tree, idx, skip))
+
+    # route 模块既可能使用 appmod._helper()，也可能直接 from app import helper。
+    app_idx = next((idx for path, _tree, idx, _skip in modules if path == ROOT / "api" / "app.py"), {})
+
+    def imported_app_helpers(tree):
+        out = {}
+        for n in tree.body:
+            if isinstance(n, ast.ImportFrom) and n.module == "app":
+                for alias in n.names:
+                    if alias.name in app_idx:
+                        out[alias.asname or alias.name] = app_idx[alias.name]
+        return out
+
+    for path, tree, idx, skip in modules:
+        imported = imported_app_helpers(tree)
+        for route_path, method, fn in _routes(tree, idx):
+            seen, todo, strs = set(), [(fn, idx)], []
             while todo:
-                node = todo.pop()
-                if id(node) in seen:
+                node, node_idx = todo.pop()
+                key = (id(node), id(node_idx))
+                if key in seen:
                     continue
-                seen.add(id(node))
-                strs += _strings(node, skip)
+                seen.add(key)
+                node_skip = skip if node_idx is idx else _docstrings(ast.Module(body=[node], type_ignores=[]))
+                strs += _strings(node, node_skip)
                 for nm in ast.walk(node):
-                    if isinstance(nm, ast.Name) and nm.id in idx:
-                        todo.append(idx[nm.id])
+                    if isinstance(nm, ast.Name):
+                        if nm.id in node_idx:
+                            todo.append((node_idx[nm.id], node_idx))
+                        elif node_idx is idx and nm.id in imported:
+                            todo.append((imported[nm.id], app_idx))
+                    elif isinstance(nm, ast.Attribute) and isinstance(nm.value, ast.Name) and nm.value.id in {"app", "appmod"} and nm.attr in app_idx:
+                        todo.append((app_idx[nm.attr], app_idx))
             reads, writes = set(), set()
             for s in strs:
-                found = {t for t in re.findall(r"\b(\w+)\b(?![.\w])", s) if t in my}  # dwd_zone_hour.csv 这类文件名不算
+                found = {t for t in re.findall(r"\b(\w+)\b(?![.\w])", s) if t in my}
                 w = set(W_MYSQL.findall(s)) & my
                 reads |= found - w
                 if method != "GET":
                     writes |= w
-            key = (path, method)
+            key = (route_path, method)
             r0, w0 = out.get(key, (set(), set()))
             out[key] = (r0 | reads, w0 | writes)
     return out

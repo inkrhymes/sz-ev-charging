@@ -30,6 +30,12 @@ for f in sql/ods/*.sql sql/dwd/*.sql sql/ads/*.sql quality/sql/dq_alert.sql qual
   docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 "$MYSQL_DATABASE" < "$f"
 done
 
+# 可重复迁移：工单告警唯一约束 + 告警列表排序索引。
+echo "  sql/migrations/20261118_ads_ticket_alert_unique.sql"
+docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 "$MYSQL_DATABASE" < sql/migrations/20261118_ads_ticket_alert_unique.sql
+echo "  sql/migrations/20261118_dq_alert_created_at_index.sql"
+docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 "$MYSQL_DATABASE" < sql/migrations/20261118_dq_alert_created_at_index.sql
+
 # 只给空库装 demo：ads_zone_occupancy_hour 已有数据（如真实 181 天）或 SKIP_DEMO_SEED=1 时跳过 3/4 步
 ADS_ROWS=$(docker exec sz-ev-mysql mysql -N -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -e "SELECT COUNT(*) FROM ads_zone_occupancy_hour" 2>/dev/null || echo 0)
 if [ "${SKIP_DEMO_SEED:-0}" = 1 ] || [ "${ADS_ROWS:-0}" -gt 0 ]; then
@@ -52,5 +58,10 @@ docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-chara
 fi
 
 echo "[5/5] 启动 API 与大屏"
+if [ -n "${REDIS_URL:-}" ]; then
+  echo "  启动 Redis 缓存"
+  docker compose up -d redis
+  until docker exec sz-ev-redis redis-cli ping >/dev/null 2>&1; do sleep 1; done
+fi
 docker compose up -d --build api
 echo "完成：http://localhost:${API_PORT:-5000}"

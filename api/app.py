@@ -13,22 +13,18 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlencode
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, has_request_context, jsonify, request, send_from_directory
+
+from utils.request_policy import configure_http
 
 app = Flask(__name__)
+configure_http(app)
 
 REPO = Path(os.getenv("REPO_ROOT", str(Path(__file__).resolve().parents[1])))
 DWD = REPO / "data" / "demo" / "dwd"
 FORCE_MOCK = os.getenv("MOCK", "0") == "1"
-
-
-@app.after_request
-def _cors(resp):
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,OPTIONS"
-    return resp
 
 
 def _in_range(ts: str) -> bool:
@@ -53,12 +49,11 @@ def _api_fallback(_any):
     return jsonify({"ok": False, "error": f"接口不存在：/api/{_any}（服务端可能还是旧版本）"}), 404
 
 
-def ok(data):
-    return jsonify({"ok": True, "data": data})
+from utils.http import err, ok, json_body, positive_int
 
-
-def err(msg, code=400):
-    return jsonify({"ok": False, "error": msg}), code
+# Compatibility aliases retained for existing tests/integrations.
+_json_body = json_body
+_positive_int = positive_int
 
 
 def _has_dwd() -> bool:
@@ -84,6 +79,10 @@ class MySQLUnavailable(Exception):
     """API_STRICT_MYSQL=1 时 MySQL 不可用，直接 503，不退回文件。"""
 
 
+class MySQLWriteUnavailable(MySQLUnavailable):
+    """MySQL 写失败时拒绝写入，不回退到进程内存。"""
+
+
 def strict_mysql() -> bool:
     return os.getenv("API_STRICT_MYSQL", "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -106,6 +105,12 @@ def _on_mysql_unavailable(e):
                     "source": "mysql", "fallback": False, "mysql_error": str(e)}), 503
 
 
+@app.errorhandler(MySQLWriteUnavailable)
+def _on_mysql_write_unavailable(_e):
+    return jsonify({"ok": False, "error": "MySQL 不可用，写操作已拒绝；未切换到内存存储，请检查数据库连接后重试",
+                    "source": "mysql", "fallback": False}), 503
+
+
 @app.after_request
 def _data_source_headers(resp):
     """MySQL 模式下每个 /api 响应都带上实际数据源，退回文件时不再“悄悄”。"""
@@ -124,22 +129,54 @@ def _mysql_connect():
                            init_command="SET time_zone='+08:00'", cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
 
 
-def _sql(query: str, args=()) -> list[dict] | None:
-    """执行只读查询；连不上或出错返回 None（并记录 fallback），调用方据此退回文件模式；严格模式下抛 503。"""
+def _mysql_connection_for_query():
+    """同一 HTTP 请求复用一个连接；非请求上下文独立管理。"""
+    if has_request_context():
+        conn = getattr(g, "_mysql_conn", None)
+        if conn is None:
+            conn = _mysql_connect()
+            g._mysql_conn = conn
+        return conn, False
+    return _mysql_connect(), True
+
+
+def _close_mysql_connection(conn):
     try:
-        conn = _mysql_connect()
+        conn.close()
     except Exception as e:
-        _mysql_failed(e)
-        return None
+        app.logger.warning("关闭 MySQL 连接失败：%s", type(e).__name__)
+
+
+@app.teardown_request
+def _close_request_mysql_connection(_error=None):
+    conn = getattr(g, "_mysql_conn", None)
+    if conn is not None:
+        g._mysql_conn = None
+        _close_mysql_connection(conn)
+
+
+def _sql(query: str, args=()) -> list[dict] | None:
+    """执行只读查询；请求内复用连接，出错时关闭坏连接并按原策略回退或返回 503。"""
+    conn = None
+    owned = False
     try:
+        conn, owned = _mysql_connection_for_query()
         with conn.cursor() as cur:
             cur.execute(query, args)
             return list(cur.fetchall())
     except Exception as e:
+        if conn is not None and not owned:
+            _close_mysql_connection(conn)
+            try:
+                if getattr(g, "_mysql_conn", None) is conn:
+                    g._mysql_conn = None
+            except RuntimeError:
+                pass
         _mysql_failed(e)
         return None
     finally:
-        conn.close()
+        if conn is not None and owned:
+            _close_mysql_connection(conn)
 
 
 def _num(v, nd=None):
@@ -275,234 +312,6 @@ def tickets_store():
     return _TICKETS
 
 
-@app.get("/api/health")
-def health():
-    """mode=配置的数据源；source=实际能用的数据源；fallback=配置了 mysql 但连不上、正在退回文件。"""
-    mode = "mysql" if use_mysql() else ("file" if use_file() else "mock")
-    data = {"service": "sz-ev-api", "mode": mode, "dwd": str(DWD), "source": mode if mode != "mysql" else "mysql",
-            "fallback": False, "mysql_error": None, "strict_mysql": strict_mysql()}
-    if mode == "mysql":
-        try:
-            conn = _mysql_connect()
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            finally:
-                conn.close()
-        except Exception as e:
-            msg = f"{type(e).__name__}: {e}"
-            g.mysql_error = msg
-            app.logger.warning("MySQL 健康检查失败：%s", msg)
-            data.update(mysql_error=msg)
-            if strict_mysql():
-                return jsonify({"ok": False, "data": data, "error": "MySQL 不可用（API_STRICT_MYSQL=1）"}), 503
-            data.update(source="file" if use_file() else "mock", fallback=True)
-    return ok(data)
-
-
-@app.get("/api/data_range")
-def data_range():
-    """页面顶部「数据时间」：库里/文件里实际有数据的首尾日期（只读）。"""
-    if use_mysql():
-        r = _sql("SELECT MIN(dt) AS d0, MAX(dt) AS d1 FROM ads_city_overview")
-        if r and r[0].get("d0"):
-            return ok({"from": str(r[0]["d0"])[:10], "to": str(r[0]["d1"])[:10]})
-    if use_file():
-        try:
-            ts = [r["ts_hour"][:10] for r in _zone_rows() if r.get("ts_hour")]
-            if ts:
-                return ok({"from": min(ts), "to": max(ts)})
-        except OSError:
-            pass
-    return ok({"from": "2022-09-01", "to": "2022-09-14"})
-
-
-@app.get("/api/overview")
-def overview():
-    dt = request.args.get("dt") or "2022-09-01"
-    if use_mysql() and (r := _mysql_overview(dt)) is not None:
-        return ok(r)
-    if use_file():
-        q = _quality_rows()
-        z = _zone_rows()
-        stuck = sum(1 for r in q if r.get("stuck_flag") in {"1", "1.0", 1})
-        high = sum(1 for r in q if float(r.get("missing_rate") or 0) > 0.30)
-        zones = {r["taz_id"] for r in q} | {r["taz_id"] for r in z}
-        # avg occupancy & peak hour on first day window
-        by_hour = defaultdict(list)
-        for r in z:
-            if not r["ts_hour"].startswith(dt[:10]):
-                continue
-            try:
-                hour = int(r["ts_hour"][11:13])
-                by_hour[hour].append(float(r["occupancy_avg"]))
-            except (ValueError, IndexError):
-                continue
-        peak_hour = 19
-        avg_occ = 0.0
-        if by_hour:
-            peak_hour = max(by_hour, key=lambda h: sum(by_hour[h]) / len(by_hour[h]))
-            allv = [v for vs in by_hour.values() for v in vs]
-            avg_occ = round(sum(allv) / len(allv), 4) if allv else 0.0
-        else:
-            allv = [float(r["occupancy_avg"]) for r in z[:500]]
-            avg_occ = round(sum(allv) / len(allv), 4) if allv else 0.0
-        return ok(
-            {
-                "dt": dt[:10],
-                "station_cnt": len(q),
-                "zone_cnt": len(zones),
-                "avg_occupancy": avg_occ,
-                "peak_hour": peak_hour,
-                "stuck_cnt": stuck,
-                "high_missing_cnt": high,
-            }
-        )
-    return ok(
-        {
-            "dt": dt[:10],
-            "station_cnt": 25,
-            "zone_cnt": 23,
-            "avg_occupancy": 0.42,
-            "peak_hour": 19,
-            "stuck_cnt": 4,
-            "high_missing_cnt": 6,
-        }
-    )
-
-
-@app.get("/api/site/suggest")
-def site_suggest():
-    """选址/加桩建议：ads_zone_site_suggest 最新一批，按 rank 升序取前 top 个（默认 20，最多 331）。
-    只在 MySQL 模式下有数据；文件模式或表不存在/为空时返回空列表。"""
-    try:
-        top = max(1, min(int(request.args.get("top", 20)), 331))
-    except ValueError:
-        return err("top 必须是整数", 400)
-    if not use_mysql():
-        return ok({"source": "none", "run_dt": None, "items": []})
-    r = _sql("SELECT run_dt, taz_id, center_lon, center_lat, station_cnt, piles, rated_kw, avg_occupancy, peak_occupancy,"
-             " busy_hours_ratio, demand_score, supply_score, gap_score, suggest_add_piles, `rank`, function_tag, reason"
-             " FROM ads_zone_site_suggest WHERE run_dt=(SELECT MAX(run_dt) FROM ads_zone_site_suggest)"
-             " ORDER BY `rank` IS NULL, `rank`, gap_score DESC LIMIT %s", (top,))
-    if not r:
-        return ok({"source": "none" if r is None else "mysql", "run_dt": None, "items": []})
-    nums = {"center_lon": 6, "center_lat": 6, "rated_kw": 2, "avg_occupancy": 4, "peak_occupancy": 4,
-            "busy_hours_ratio": 4, "demand_score": 4, "supply_score": 4, "gap_score": 4}
-    items = [{k: (str(v) if k == "taz_id" else _num(v, nums[k]) if k in nums else v)
-              for k, v in x.items() if k != "run_dt"} for x in r]
-    return ok({"source": "mysql", "run_dt": str(r[0]["run_dt"])[:10], "items": items})
-
-
-@app.get("/api/realtime/zones")
-def realtime_zones():
-    """准实时：每个片区最新一个 15 分钟窗口（rt_zone_occupancy，由 stream/zone_occupancy_stream.py 写入）。
-    只在 MySQL 模式下有数据；文件模式或表为空时返回空列表。"""
-    if not use_mysql():
-        return ok({"source": "none", "zones": []})
-    r = _sql("SELECT t.taz_id, t.window_start, t.window_end, t.occupancy, t.busy_sum, t.piles_sum, t.station_cnt,"
-             " t.outlier_cnt, t.dropped_src_cnt, t.write_ts, t.latency_ms FROM rt_zone_occupancy t JOIN (SELECT taz_id, MAX(window_end) AS we"
-             " FROM rt_zone_occupancy GROUP BY taz_id) m ON t.taz_id=m.taz_id AND t.window_end=m.we")
-    if r is None:
-        return ok({"source": "none", "zones": []})
-    zones = sorted(({"taz_id": str(x["taz_id"]), "window_start": _ts(x["window_start"]), "window_end": _ts(x["window_end"]),
-                     "occupancy": _num(x["occupancy"], 4), "busy_sum": x["busy_sum"], "piles_sum": x["piles_sum"],
-                     "station_cnt": x["station_cnt"],
-                     "outlier_cnt": x.get("outlier_cnt"), "dropped_src_cnt": x.get("dropped_src_cnt"), "write_ts": _ts(x["write_ts"])[:19], "latency_ms": x["latency_ms"]}
-                    for x in r), key=lambda z: int(z["taz_id"]) if z["taz_id"].isdigit() else 0)
-    return ok({"source": "mysql", "zones": zones})
-
-
-@app.get("/api/zones")
-def zones_list():
-    if use_mysql() and (r := _mysql_zones()) is not None:
-        return ok(r)
-    if use_file():
-        ids = sorted({r["taz_id"] for r in _zone_rows()}, key=lambda x: int(x) if str(x).isdigit() else 0)
-    else:
-        ids = ["1011", "1062", "335"]
-    return ok(ids)
-
-
-@app.get("/api/zone/series")
-def zone_series():
-    taz_id = request.args.get("taz_id")
-    if use_mysql() and (r := _mysql_series(taz_id)) is not None:
-        return ok(r)
-    if use_file():
-        rows = _zone_rows()
-        if not taz_id:
-            taz_id = rows[0]["taz_id"] if rows else "1011"
-        points = []
-        for r in rows:
-            if r["taz_id"] != taz_id or not _in_range(r["ts_hour"]):
-                continue
-            busy = float(r.get("busy_sum") or 0)
-            piles = float(r.get("piles_sum") or 0) or 1
-            occ = float(r.get("occupancy_avg") or 0)
-            # 数据里没有额定功率，负荷不估算，留空（前端显示「暂无」）
-            points.append(
-                {
-                    "taz_id": taz_id,
-                    "ts_hour": r["ts_hour"],
-                    "occupancy": round(occ, 6),
-                    "load_kw_est": None,
-                }
-            )
-            if len(points) >= 168 and not request.args.get("to"):
-                break
-        return ok({"taz_id": taz_id, "points": points})
-    taz_id = taz_id or "1011"
-    base = datetime.fromisoformat("2022-09-01T00:00:00")
-    series = [
-        {
-            "taz_id": taz_id,
-            "ts_hour": (base + timedelta(hours=i)).strftime("%Y-%m-%d %H:%M:%S"),
-            "occupancy": round(0.3 + 0.2 * ((i % 24) / 24), 4),
-            "load_kw_est": None,
-        }
-        for i in range(48)
-    ]
-    return ok({"taz_id": taz_id, "points": series})
-
-
-@app.get("/api/quality")
-def quality():
-    if use_mysql() and (r := _mysql_quality()) is not None:
-        return ok(r)
-    if use_file():
-        q = _quality_rows()
-        stuck = sum(1 for r in q if r.get("stuck_flag") in {"1", "1.0", 1})
-        high = sum(1 for r in q if float(r.get("missing_rate") or 0) > 0.30)
-        # row missing from report: prefer summing missing_rows/rows
-        miss = sum(int(float(r.get("missing_rows") or 0)) for r in q)
-        total = sum(int(float(r.get("rows") or 0)) for r in q) or 1
-        return ok(
-            [
-                {
-                    "metric": "row_missing_rate",
-                    "value": round(miss / total, 4),
-                    "note": f"{miss}/{total} 实测",
-                },
-                {"metric": "stuck_station_cnt", "value": stuck, "note": "演示子集实测"},
-                {
-                    "metric": "high_missing_station_cnt",
-                    "value": high,
-                    "note": "missing_rate>0.30",
-                },
-                {"metric": "demo_station_cnt", "value": len(q), "note": "锁定 25 站"},
-            ]
-        )
-    return ok(
-        [
-            {"metric": "row_missing_rate", "value": 0.2642, "note": "质检报告实测"},
-            {"metric": "stuck_station_cnt", "value": 4, "note": "演示子集实测"},
-            {"metric": "high_missing_station_cnt", "value": 6, "note": "missing_rate>0.30"},
-            {"metric": "demo_station_cnt", "value": 25, "note": "锁定 25 站"},
-        ]
-    )
-
-
 FORECAST = REPO / "forecast"
 
 
@@ -567,97 +376,23 @@ def _forecast_window():
 
 
 def _mysql_forecast_preds(taz_id):
-    """MySQL 模式优先读每日生产预测表 ads_forecast_zone_hour（forecast/daily.py 写入）。
-    返回 ({(taz_id, ts_hour): {"y_hat_lgbm": ..}}, forecast_window)；表不存在/为空时返回 ({}, None)，调用方退回 predictions.csv。"""
+    """MySQL 模式优先读每日生产预测表，并复用当前请求的 MySQL 连接。"""
     try:
-        conn = _mysql_connect()
+        window_rows = _sql("SELECT MIN(ts_hour) AS t0, MAX(ts_hour) AS t1 FROM ads_forecast_zone_hour")
+        if not window_rows:
+            return {}, None
+        w = window_rows[0]
+        if not w.get("t0"):
+            return {}, None
+        rows = _sql("SELECT taz_id, ts_hour, y_hat_lgbm FROM ads_forecast_zone_hour WHERE taz_id=%s", (taz_id,))
+        if rows is None:
+            return {}, None
+    except MySQLUnavailable:
+        return {}, None
     except Exception:
         return {}, None
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT MIN(ts_hour) AS t0, MAX(ts_hour) AS t1 FROM ads_forecast_zone_hour")
-            w = cur.fetchone() or {}
-            if not w.get("t0"):
-                return {}, None
-            cur.execute("SELECT taz_id, ts_hour, y_hat_lgbm FROM ads_forecast_zone_hour WHERE taz_id=%s", (taz_id,))
-            rows = cur.fetchall()
-    except Exception:  # 表还没建（老库）→ 静默退回 predictions.csv
-        return {}, None
-    finally:
-        conn.close()
     preds = {(str(x["taz_id"]), _ts(x["ts_hour"])): {"y_hat_lgbm": x["y_hat_lgbm"]} for x in rows}
     return preds, {"from": _ts(w["t0"]), "to": _ts(w["t1"])}
-
-
-@app.get("/api/forecast/metrics")
-def forecast_metrics():
-    """每日预测误差序列（forecast/evaluate.py 写入 ads_forecast_metric_daily）。非 MySQL 模式或无数据时 points 为空。"""
-    pts, src = [], "none"
-    if use_mysql():
-        r = _sql("SELECT ds, n, mae_lgbm, rmse_lgbm, mae_lag1, rmse_lag1, mae_lag24, model_version, drift "
-                 "FROM ads_forecast_metric_daily ORDER BY ds")
-        if r is not None:
-            src = "mysql"
-            pts = [{"ds": str(x["ds"])[:10], "n": x["n"], "mae_lgbm": _num(x["mae_lgbm"], 6),
-                    "rmse_lgbm": _num(x["rmse_lgbm"], 6), "mae_lag1": _num(x["mae_lag1"], 6),
-                    "rmse_lag1": _num(x["rmse_lag1"], 6), "mae_lag24": _num(x.get("mae_lag24"), 6),
-                    "model_version": x.get("model_version"), "drift": bool(x.get("drift"))} for x in r]
-    return ok({"source": src, "points": pts})
-
-
-@app.get("/api/baseline")
-def baseline():
-    taz_id = request.args.get("taz_id")
-    if use_mysql() and (r := _mysql_baseline(taz_id)) is not None:
-        db_preds, db_win = _mysql_forecast_preds(r["taz_id"])
-        preds = db_preds or _forecast_preds()
-        return ok({**r, "points": _with_lgbm(r["points"], preds),
-                   "metrics": _forecast_metrics(), "forecast_window": db_win or _forecast_window()})
-    if use_file():
-        rows = _zone_rows()
-        if not taz_id:
-            taz_id = rows[0]["taz_id"] if rows else "1011"
-        series = [r for r in rows if r["taz_id"] == taz_id and _in_range(r["ts_hour"])]
-        if not request.args.get("to"):
-            series = series[:48]
-        points = []
-        prev = None
-        for r in series:
-            y = float(r["occupancy_avg"])
-            yhat = prev if prev is not None else y
-            points.append(
-                {
-                    "taz_id": taz_id,
-                    "ts_hour": r["ts_hour"],
-                    "y_true": round(y, 6),
-                    "y_hat_lag1": round(yhat, 6),
-                    "abs_err": round(abs(y - yhat), 6),
-                }
-            )
-            prev = y
-        preds = _forecast_preds()
-        if not points and preds:
-            points = _pred_series(taz_id, preds)
-        return ok({"taz_id": taz_id, "points": _with_lgbm(points, preds),
-                   "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
-    taz_id = taz_id or "1011"
-    base = datetime.fromisoformat("2022-09-01T01:00:00")
-    points = []
-    prev = 0.35
-    for i in range(24):
-        y = round(0.35 + 0.15 * ((i % 12) / 12), 4)
-        points.append(
-            {
-                "taz_id": taz_id,
-                "ts_hour": (base + timedelta(hours=i)).strftime("%Y-%m-%d %H:%M:%S"),
-                "y_true": y,
-                "y_hat_lag1": prev,
-                "abs_err": round(abs(y - prev), 4),
-            }
-        )
-        prev = y
-    return ok({"taz_id": taz_id, "points": _with_lgbm(points, {}),
-               "metrics": _forecast_metrics(), "forecast_window": _forecast_window()})
 
 
 # 工单：API_SOURCE=mysql（或 ALERT_DB=mysql）时存 ads_ticket（含 alert_id 列，见 sql/migrations/20261025_ads_ticket_alert_id.sql），否则进程内存
@@ -668,126 +403,45 @@ def _ticket_out(r: dict) -> dict:
             "created_at": fmt(r.get("created_at")), "updated_at": fmt(r.get("updated_at"))}
 
 
-def _ticket_db_call(fn):
-    """在 ads_ticket 上执行 fn(cur)；未启用或出错返回 (False, None)，调用方退回内存。"""
+def _ticket_db_call(fn, *, write=False):
+    """在 ads_ticket 上执行 fn(cur)；写失败返回 503，不回退内存。"""
+    if not _db_on("ALERT_DB"):
+        return False, None
     con = _alert_db()
     if not con:
+        if write:
+            raise MySQLWriteUnavailable()
         return False, None
     try:
         with con, con.cursor() as cur:
             r = fn(cur)
             con.commit()
             return True, r
+    except MySQLUnavailable:
+        raise
     except Exception as e:
         _mysql_failed(e)
+        if write:
+            raise MySQLWriteUnavailable() from e
         return False, None
 
 
-@app.get("/api/tickets")
-def tickets_list():
-    used, rows = _ticket_db_call(lambda cur: (cur.execute("SELECT * FROM ads_ticket ORDER BY ticket_id"), cur.fetchall())[1])
-    if used:
-        return ok([_ticket_out(r) for r in rows])
-    return ok(tickets_store())
+def demo_auth_enabled() -> bool:
+    return os.getenv("AUTH_DEMO_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _require_admin():
-    """角色只认请求头 Authorization: Bearer <token>（token 由 /api/auth/login 下发，形如 demo-admin），不信任请求体里的 role。
-    返回 None 表示放行，否则返回错误响应。"""
+    """演示令牌仅在 AUTH_DEMO_ENABLED=1 时生效，不可用于生产认证。"""
     h = request.headers.get("Authorization", "")
     token = h[7:].strip() if h.lower().startswith("bearer ") else ""
     role = {"demo-admin": "admin", "demo-readonly": "readonly"}.get(token)
     if role is None:
         return err("未登录或登录已失效，请先登录", 401)
+    if role == "admin" and not demo_auth_enabled():
+        return err("演示管理员认证未启用；请勿将演示认证用于公网部署", 503)
     if role != "admin":
         return err("访客为只读权限，无法修改，请使用管理员登录", 403)
     return None
-
-
-@app.patch("/api/tickets/<int:ticket_id>")
-def tickets_patch(ticket_id):
-    denied = _require_admin()
-    if denied:
-        return denied
-    body = request.get_json(silent=True) or {}
-    status = body.get("status")
-    if status not in {"open", "processing", "done"}:
-        return err("status must be open|processing|done")
-    def upd(cur):
-        # started_at：第一次进入 processing 时记下开始处理时间，之后不再改（见 sql/migrations/20261025_ads_ticket_started_at.sql）
-        sql = ("UPDATE ads_ticket SET status=%s, updated_at=NOW()"
-               + (", started_at=COALESCE(started_at, NOW())" if status == "processing" else "") + " WHERE ticket_id=%s")
-        if not cur.execute(sql, (status, ticket_id)):
-            cur.execute("SELECT 1 FROM ads_ticket WHERE ticket_id=%s", (ticket_id,))
-            if not cur.fetchone():
-                return None
-        cur.execute("SELECT * FROM ads_ticket WHERE ticket_id=%s", (ticket_id,))
-        return _ticket_out(cur.fetchone())
-    used, t = _ticket_db_call(upd)
-    if used:
-        return ok(t) if t else err("ticket not found", 404)
-    for t in tickets_store():
-        if t["ticket_id"] == ticket_id:
-            t["status"] = status
-            if status == "processing" and not t.get("started_at"):
-                t["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-            return ok(t)
-    return err("ticket not found", 404)
-
-
-@app.post("/api/tickets")
-def tickets_create():
-    """从告警派工单：{station_id, type?, alert_id?}。带 alert_id 时同一条告警只派一次，并把告警改成处理中（ack）。
-    API_SOURCE=mysql（或 ALERT_DB=mysql）时写 ads_ticket，否则存进程内存。"""
-    denied = _require_admin()
-    if denied:
-        return denied
-    body = request.get_json(silent=True) or {}
-    sid = str(body.get("station_id") or "").strip()
-    typ = body.get("type") or "repair"
-    if not sid:
-        return err("station_id 不能为空")
-    if typ not in {"repair", "inspect"}:
-        return err("type must be repair|inspect")
-    alert_id = body.get("alert_id")
-    if alert_id is not None:
-        alert_id = int(alert_id)
-
-    def ins(cur):
-        if alert_id is not None:
-            cur.execute("SELECT ticket_id FROM ads_ticket WHERE alert_id=%s LIMIT 1", (alert_id,))
-            d = cur.fetchone()
-            if d:
-                return {"dup": d["ticket_id"]}
-        cur.execute("INSERT INTO ads_ticket (station_id, alert_id, type, status) VALUES (%s, %s, %s, 'open')", (sid, alert_id, typ))
-        cur.execute("SELECT * FROM ads_ticket WHERE ticket_id=%s", (cur.lastrowid,))
-        return _ticket_out(cur.fetchone())
-    used, t = _ticket_db_call(ins)
-    if used:
-        if "dup" in t:
-            return err(f"这条告警已经派过工单 WO-{t['dup']:04d}", 409)
-        alert = alerts_write(alert_id, "ack", f"已派工单 WO-{t['ticket_id']:04d}") if alert_id is not None else None
-        return ok({"ticket": t, "alert": alert}), 201
-    store = tickets_store()
-    if alert_id is not None:
-        dup = next((t for t in store if t.get("alert_id") == alert_id), None)
-        if dup:
-            return err(f"这条告警已经派过工单 WO-{dup['ticket_id']:04d}", 409)
-    t = {"ticket_id": max((x["ticket_id"] for x in store), default=0) + 1, "station_id": sid, "type": typ,
-         "status": "open", "alert_id": alert_id, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
-    store.append(t)
-    alert = alerts_write(alert_id, "ack", f"已派工单 WO-{t['ticket_id']:04d}") if alert_id is not None else None
-    return ok({"ticket": t, "alert": alert}), 201
-
-
-@app.post("/api/auth/login")
-def auth_login():
-    body = request.get_json(silent=True) or {}
-    user = body.get("user") or "demo"
-    role = body.get("role") or "readonly"
-    if role not in {"readonly", "admin"}:
-        return err("role must be readonly|admin")
-    return ok({"user": user, "role": role, "token": f"demo-{role}"})
 
 
 # ---- 站点明细（数据质量 / 运维工单表格页）----
@@ -845,38 +499,6 @@ def _station_detail_rows():
     for x in rows:
         x.setdefault("occupancy_rank", None)
     return rows
-
-
-@app.get("/api/stations")
-def stations():
-    """站点明细：?status=stuck|high_missing|normal &taz_id= &sort=avg_occupancy|missing_rate|station_id &order=asc|desc &page=1 &page_size=10"""
-    if not use_file():
-        return ok({"total": 0, "page": 1, "page_size": 10, "items": []})
-    rows = list(_station_detail_rows())
-    st = request.args.get("status")
-    if st:
-        rows = [r for r in rows if r["status"] == st]
-    taz = request.args.get("taz_id")
-    if taz:
-        rows = [r for r in rows if str(r["taz_id"]) == taz]
-    sort = request.args.get("sort", "avg_occupancy")
-    if sort not in {"avg_occupancy", "missing_rate", "station_id", "total_volume_kwh"}:
-        return err("bad sort")
-    desc = request.args.get("order", "desc") == "desc"
-    rows.sort(key=lambda r: (r[sort] is None, r[sort] if r[sort] is not None else 0), reverse=False)
-    if desc:
-        nn = [r for r in rows if r[sort] is not None][::-1]
-        rows = nn + [r for r in rows if r[sort] is None]
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-        size = min(100, max(1, int(request.args.get("page_size", 10))))
-    except ValueError:
-        return err("bad page")
-    total = len(rows)
-    items = rows[(page - 1) * size: page * size]
-    return ok({"total": total, "page": page, "page_size": size, "items": items})
-
-
 
 
 # ---- 片区地图 / 告警（小黄，前端第 6、7 页）----
@@ -941,26 +563,17 @@ def _lake_map():
 
 
 def _mysql_map():
-    """API_SOURCE=mysql（或 MAP_DB=mysql）时优先读库：dim_station（站点坐标）+ ads_zone_daily（片区日均、中心点，取最新一天）。连不上就返回 None。"""
+    """MySQL 地图数据：复用请求内连接，避免同一请求重复建立连接。"""
     if not _db_on("MAP_DB"):
         return None
-    try:
-        import pymysql
-        conn = pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
-                               user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
-                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", init_command="SET time_zone='+08:00'", connect_timeout=3,
-                               cursorclass=pymysql.cursors.DictCursor)
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT station_id, taz_id, longitude, latitude, total_piles FROM dim_station")
-            si = cur.fetchall()
-            cur.execute("SELECT taz_id, avg_occupancy, station_cnt, pile_cnt, center_lon, center_lat FROM ads_zone_daily "
-                        "WHERE dt = (SELECT MAX(dt) FROM ads_zone_daily)")
-            zd = {str(r["taz_id"]): r for r in cur.fetchall()}
-    except Exception as e:
-        _mysql_failed(e)
+    si = _sql("SELECT station_id, taz_id, longitude, latitude, total_piles FROM dim_station")
+    zd_rows = _sql("SELECT taz_id, avg_occupancy, station_cnt, pile_cnt, center_lon, center_lat FROM ads_zone_daily "
+                   "WHERE dt = (SELECT MAX(dt) FROM ads_zone_daily)")
+    if si is None or zd_rows is None:
         return None
     if not si:
         return None
+    zd = {str(r["taz_id"]): r for r in zd_rows}
     f = lambda v: float(v) if v is not None else None
     stations, pos = [], defaultdict(lambda: [0.0, 0.0, 0, 0])
     for r in si:
@@ -977,47 +590,6 @@ def _mysql_map():
                       "station_count": z.get("station_cnt") or n, "total_piles": z.get("pile_cnt") or piles,
                       "avg_occupancy": round(occ, 4) if occ is not None else None})
     return zones, stations
-
-
-@app.get("/api/map/zones")
-def map_zones():
-    """片区地图：每个片区的中心经纬度、站数、平均占用率，以及站点坐标。"""
-    src = "mysql"
-    lake = _mysql_map()
-    if not lake:
-        src, lake = "lake", _lake_map()
-    if lake:
-        zones, stations = lake
-        taz = request.args.get("taz_id")
-        if taz:
-            return ok({"zones": [], "stations": [s for s in stations if s["taz_id"] == taz], "source": src})
-        # 站多时不一次性返回，前端点片区时再按 taz_id 取
-        return ok({"zones": zones, "stations": stations if len(stations) <= 300 else [],
-                   "station_total": len(stations), "source": src})
-    if not use_file():
-        return ok({"zones": [], "stations": []})
-    demo_list = REPO / "data" / "demo" / "demo_station_list.csv"
-    coords = {}
-    if demo_list.is_file():
-        with demo_list.open(encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                coords[r["sid"]] = (float(r["longitude"]), float(r["latitude"]))
-    stations_out, agg = [], defaultdict(lambda: {"lon": 0.0, "lat": 0.0, "n": 0, "occ": [], "piles": 0})
-    for s in _station_detail_rows():
-        if s["station_id"] not in coords:
-            continue
-        lon, lat = coords[s["station_id"]]
-        stations_out.append({**s, "lon": lon, "lat": lat})
-        a = agg[str(s["taz_id"])]
-        a["lon"] += lon; a["lat"] += lat; a["n"] += 1; a["piles"] += s["total_piles"] or 0
-        if s["avg_occupancy"] is not None:
-            a["occ"].append(s["avg_occupancy"])
-    zones = [{
-        "taz_id": z, "lon": round(a["lon"] / a["n"], 6), "lat": round(a["lat"] / a["n"], 6),
-        "station_count": a["n"], "total_piles": a["piles"],
-        "avg_occupancy": round(sum(a["occ"]) / len(a["occ"]), 4) if a["occ"] else None,
-    } for z, a in agg.items()]
-    return ok({"zones": zones, "stations": stations_out})
 
 
 ALERT_LEVEL = {"stuck": "high", "high_missing": "medium", "long_gap": "low"}
@@ -1096,7 +668,7 @@ def alerts_read() -> tuple[list[dict], str]:
     if con:
         try:
             with con, con.cursor() as cur:
-                cur.execute("SELECT * FROM dq_alert ORDER BY created_at DESC LIMIT 1000")
+                cur.execute("SELECT * FROM dq_alert ORDER BY created_at DESC, alert_id DESC LIMIT 1000")
                 return [_norm_alert(r) for r in cur.fetchall()], "mysql"
         except Exception as e:
             _mysql_failed(e)
@@ -1105,8 +677,10 @@ def alerts_read() -> tuple[list[dict], str]:
 
 
 def alerts_write(alert_id: int, status: str, note: str | None):
-    con = _alert_db()
-    if con:
+    if _db_on("ALERT_DB"):
+        con = _alert_db()
+        if not con:
+            raise MySQLWriteUnavailable()
         try:
             with con, con.cursor() as cur:
                 if note is None:
@@ -1117,11 +691,14 @@ def alerts_write(alert_id: int, status: str, note: str | None):
                 con.commit()
                 if n:
                     cur.execute("SELECT * FROM dq_alert WHERE alert_id=%s", (alert_id,))
-                    return _norm_alert(cur.fetchone())
+                    row = cur.fetchone()
+                    return _norm_alert(row) if row else None
                 return None
+        except MySQLUnavailable:
+            raise
         except Exception as e:
             _mysql_failed(e)
-            pass
+            raise MySQLWriteUnavailable() from e
     for a in alerts_store():
         if a["alert_id"] == alert_id:
             a["status"] = status
@@ -1132,54 +709,6 @@ def alerts_write(alert_id: int, status: str, note: str | None):
     return None
 
 
-@app.get("/api/alerts")
-def alerts_list():
-    rows, _src = alerts_read()
-    st = request.args.get("status")
-    return ok([a for a in rows if not st or a["status"] == st])
-
-
-@app.patch("/api/alerts/<int:alert_id>")
-def alerts_patch(alert_id):
-    denied = _require_admin()
-    if denied:
-        return denied
-    body = request.get_json(silent=True) or {}
-    status = body.get("status")
-    if status == "processing":
-        status = "ack"  # 兼容旧前端
-    if status not in ALERT_STATES:
-        return err("status must be open|ack|closed")
-    a = alerts_write(alert_id, status, body.get("note"))
-    return ok(a) if a else err("alert not found", 404)
-
-
-@app.get("/api/map/hourly")
-def map_hourly():
-    """地图时间轴：某一天每个片区 0–23 点的占用率（只读）。返回 {date, zones: {taz_id: [24 个值或 null]}}。"""
-    day = (request.args.get("date") or "2022-09-01")[:10]
-    try:
-        d0 = datetime.strptime(day, "%Y-%m-%d")
-    except ValueError:
-        return err("date must be YYYY-MM-DD")
-    out = defaultdict(lambda: [None] * 24)
-    rows = None
-    if use_mysql():
-        rows = _sql("SELECT taz_id, ts_hour, occupancy FROM ads_zone_occupancy_hour WHERE ts_hour >= %s AND ts_hour < %s",
-                    (d0.strftime("%Y-%m-%d 00:00:00"), (d0 + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")))
-        for r in rows or []:
-            out[str(r["taz_id"])][int(_ts(r["ts_hour"])[11:13])] = _num(r["occupancy"], 4)
-    if not rows and use_file():
-        try:
-            for r in _zone_rows():
-                if r["ts_hour"][:10] == day:
-                    v = r.get("occupancy_avg")
-                    out[str(r["taz_id"])][int(r["ts_hour"][11:13])] = round(float(v), 4) if v not in (None, "") else None
-        except OSError:
-            pass
-    return ok({"date": day, "zones": dict(out)})
-
-
 # 调度运行 / 监控接口（只读）：见 api/ops.py
 import ops as _ops  # noqa: E402
 _ops.register(app, lambda q, a=(): _sql(q, a), ok, err)  # lambda：测试可 monkeypatch app._sql
@@ -1187,6 +716,17 @@ import lineage as _lineage  # noqa: E402
 _lineage.register(app, ok, err)
 
 
+
+# ---- API route modules ----
+# Keep the original endpoint names/URL rules while moving HTTP handlers
+# out of the application bootstrap module.
+from routes.read import register as _register_read_routes
+from routes.tickets import register as _register_ticket_routes
+from routes.ops import register as _register_ops_routes
+
+_register_read_routes(app)
+_register_ticket_routes(app)
+_register_ops_routes(app)
 
 # ---- 可选 Redis 读缓存：设置 REDIS_URL 才启用；没设或 Redis 挂了，行为与原来完全一样 ----
 # 只缓存 GET 的只读接口、只缓存 200 且没有退回文件的响应；key 含路径 + 排序后的查询参数 + 数据源模式。
@@ -1199,6 +739,8 @@ CACHE_TTL = {  # 秒；可用 CACHE_TTL_DEFAULT 整体覆盖历史类接口
 CACHE_HISTORY = {"/api/overview", "/api/zones", "/api/zone/series", "/api/quality", "/api/map/zones", "/api/map/hourly",
                  "/api/site/suggest", "/api/forecast/metrics", "/api/baseline", "/api/data_range", "/api/stations"}
 CACHE_INVALIDATE = {"/api/alerts": ("/api/alerts", "/api/tickets", "/api/overview"), "/api/tickets": ("/api/tickets", "/api/alerts")}
+# 发布新后端版本时可递增，避免旧版本缓存结构被新代码误读。
+CACHE_VERSION = os.getenv("CACHE_VERSION", "v2")
 _redis_client = None
 _redis_down_until = 0.0
 
@@ -1239,8 +781,8 @@ def _redis_failed(e):
 
 
 def _cache_key(path: str) -> str:
-    args = "&".join(f"{k}={v}" for k, vs in sorted(request.args.lists()) for v in vs)
-    return f"szev:{'mysql' if use_mysql() else 'file'}:{path}?{args}"
+    args = urlencode([(k, v) for k, values in sorted(request.args.lists()) for v in values])
+    return f"szev:{CACHE_VERSION}:{'mysql' if use_mysql() else 'file'}:{path}?{args}"
 
 
 @app.before_request
@@ -1273,7 +815,9 @@ def _cache_store(resp):
         resp.headers["X-Cache"] = "MISS"
         if resp.status_code == 200 and not getattr(g, "mysql_error", None) and resp.mimetype == "application/json":
             try:
-                _redis().setex(key, _cache_ttl(request.path), resp.get_data())
+                r = _redis()
+                if r is not None:
+                    r.set(key, resp.get_data(), ex=_cache_ttl(request.path))
             except Exception as e:
                 _redis_failed(e)
     elif request.method in ("POST", "PATCH", "PUT", "DELETE") and resp.status_code < 400:
@@ -1292,4 +836,5 @@ def _cache_store(resp):
 
 # 必须放在文件末尾：python app.py 时 app.run() 会阻塞，写在它后面的路由（地图、告警）不会注册。
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    debug = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(host="0.0.0.0", port=5000, debug=debug)
