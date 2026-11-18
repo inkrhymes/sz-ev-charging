@@ -856,6 +856,10 @@ def tickets_create():
 
     def ins(cur):
         if alert_id is not None:
+            # 锁住告警行，再检查工单，避免并发派工把同一告警派成两张工单。
+            cur.execute("SELECT alert_id FROM dq_alert WHERE alert_id=%s FOR UPDATE", (alert_id,))
+            if not cur.fetchone():
+                return {"alert_missing": True}
             cur.execute("SELECT ticket_id FROM ads_ticket WHERE alert_id=%s LIMIT 1", (alert_id,))
             d = cur.fetchone()
             if d:
@@ -880,11 +884,16 @@ def tickets_create():
 
     used, result = _ticket_db_call(ins, write=True)
     if used:
+        if "alert_missing" in result:
+            return err("alert not found", 404)
         if "dup" in result:
             return err(f"这条告警已经派过工单 WO-{result['dup']:04d}", 409)
         return ok(result), 201
     store = tickets_store()
     if alert_id is not None:
+        alert = next((a for a in alerts_store() if a.get("alert_id") == alert_id), None)
+        if alert is None:
+            return err("alert not found", 404)
         dup = next((t for t in store if t.get("alert_id") == alert_id), None)
         if dup:
             return err(f"这条告警已经派过工单 WO-{dup['ticket_id']:04d}", 409)
@@ -1406,7 +1415,9 @@ def _cache_store(resp):
         resp.headers["X-Cache"] = "MISS"
         if resp.status_code == 200 and not getattr(g, "mysql_error", None) and resp.mimetype == "application/json":
             try:
-                _redis().setex(key, _cache_ttl(request.path), resp.get_data())
+                r = _redis()
+                if r is not None:
+                    r.setex(key, _cache_ttl(request.path), resp.get_data())
             except Exception as e:
                 _redis_failed(e)
     elif request.method in ("POST", "PATCH", "PUT", "DELETE") and resp.status_code < 400:

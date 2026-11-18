@@ -29,13 +29,17 @@ jobs:
         run: python -m forecast.train --out /tmp
 
   compose-smoke:
-    name: docker compose smoke (start.sh)
+    name: docker compose integration (MySQL + Redis + API)
     runs-on: ubuntu-latest
     needs: test
-    continue-on-error: true
+    continue-on-error: false
     steps:
       - uses: actions/checkout@v4
       - name: start stack
+        env:
+          AUTH_DEMO_ENABLED: "1"
+          REDIS_URL: redis://redis:6379/0
+          COMPOSE_PROFILES: cache
         run: |
           [ -f .env ] || cp .env.example .env
           bash scripts/start.sh
@@ -53,6 +57,17 @@ jobs:
           test "$(J /api/zones 'len(d["data"])')" = 18
           test "$(J '/api/zone/series?taz_id=1106' 'len(d["data"]["points"])')" = 168
           curl -fs $B/ | grep -q '<title>'
+          # 写链路：演示管理员仅在 CI 私有环境启用；创建后再修改工单状态。
+          TICKET_JSON=$(curl -fsS -X POST "$B/api/tickets" -H 'Content-Type: application/json' -H 'Authorization: Bearer demo-admin' -d '{"station_id":"1554","type":"repair"}')
+          TICKET_ID=$(printf '%s' "$TICKET_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["ticket"]["ticket_id"])')
+          test -n "$TICKET_ID"
+          PATCH_JSON=$(curl -fsS -X PATCH "$B/api/tickets/$TICKET_ID" -H 'Content-Type: application/json' -H 'Authorization: Bearer demo-admin' -d '{"status":"processing"}')
+          test "$(printf '%s' "$PATCH_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["status"])')" = processing
+          # Redis：第一次 MISS、第二次 HIT，确认缓存真的来自共享 Redis。
+          curl -fsS -D /tmp/z1.headers -o /tmp/z1.json "$B/api/zones"
+          curl -fsS -D /tmp/z2.headers -o /tmp/z2.json "$B/api/zones"
+          grep -qi '^X-Cache: MISS' /tmp/z1.headers
+          grep -qi '^X-Cache: HIT' /tmp/z2.headers
       - name: logs on failure
         if: failure()
         run: docker compose logs --tail=200

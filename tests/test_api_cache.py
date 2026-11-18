@@ -69,3 +69,13 @@ def test_cache_key_urlencodes_query_values(m):
     with m.app.test_request_context("/api/overview?dt=2022-09-01%26other%3Dvalue"):
         key = m._cache_key("/api/overview")
     assert "dt=2022-09-01%26other%3Dvalue" in key
+
+
+def test_cache_store_handles_redis_becoming_unavailable(m, monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setattr(m, "_redis", lambda: None)
+    with m.app.test_request_context("/api/zones"):
+        m.g.cache_key = "szev:file:/api/zones?"
+        resp = m.app.response_class('{"ok":true}', status=200, mimetype="application/json")
+        out = m._cache_store(resp)
+    assert out.headers["X-Cache"] == "MISS"

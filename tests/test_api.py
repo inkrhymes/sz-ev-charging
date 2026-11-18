@@ -198,6 +198,8 @@ def test_ticket_from_alert(client):
     d = r.get_json()["data"]
     assert d["ticket"]["alert_id"] == a["alert_id"] and d["alert"]["status"] == "ack"
     assert client.post("/api/tickets", json=body, headers=ADMIN).status_code == 409
+    missing = client.post("/api/tickets", json={"station_id": a["station_id"], "alert_id": 999999999}, headers=ADMIN)
+    assert missing.status_code == 404 and missing.get_json()["ok"] is False
     assert any(t.get("alert_id") == a["alert_id"] for t in client.get("/api/tickets").get_json()["data"])
 
 
