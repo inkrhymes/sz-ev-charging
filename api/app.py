@@ -85,39 +85,7 @@ def _api_fallback(_any):
     return jsonify({"ok": False, "error": f"接口不存在：/api/{_any}（服务端可能还是旧版本）"}), 404
 
 
-def ok(data):
-    return jsonify({"ok": True, "data": data})
-
-
-def err(msg, code=400):
-    return jsonify({"ok": False, "error": msg}), code
-
-
-def _json_body():
-    body = request.get_json(silent=True)
-    if not isinstance(body, dict):
-        return None, err("请求体必须是 JSON 对象")
-    return body, None
-
-
-def _positive_int(value):
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        number = value
-    elif isinstance(value, float) and value.is_integer():
-        number = int(value)
-    elif isinstance(value, str) and value.strip().isdecimal():
-        try:
-            number = int(value.strip())
-        except ValueError:
-            return None
-    else:
-        return None
-    return number if number > 0 else None
-
-
-def _has_dwd() -> bool:
+from utils.http import err, ok, json_body, positive_int\n\n# Compatibility aliases retained for existing tests/integrations.\n_json_body = json_body\n_positive_int = positive_int\n\n\ndef _has_dwd() -> bool:
     return (DWD / "dwd_quality_station.csv").is_file() and (DWD / "dwd_zone_hour.csv").is_file()
 
 

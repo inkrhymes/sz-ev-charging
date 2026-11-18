@@ -11,7 +11,7 @@ import os
 
 from flask import g, jsonify, request
 import app as appmod
-from app import DWD, err, ok, strict_mysql, use_file, use_mysql
+from app import DWD, strict_mysql, use_file, use_mysql\nfrom utils.http import err, ok
 
 def health():
     """mode=配置的数据源；source=实际能用的数据源；fallback=配置了 mysql 但连不上、正在退回文件。"""
