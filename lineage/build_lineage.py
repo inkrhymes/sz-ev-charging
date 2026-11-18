@@ -184,7 +184,7 @@ def scan_api(my: set[str]):
 
     for path, tree, idx, skip in modules:
         for route_path, method, fn in _routes(tree, idx):
-            seen, todo, strs = set(), [fn], []
+            seen, todo, strs = set(), [(fn, idx)], []
             while todo:
                 node, node_idx = todo.pop()
                 key = (id(node), id(node_idx))
