@@ -43,50 +43,45 @@ UrbanEV 原始 5 分钟 CSV（1,682 站 / 181 天）
 | Kafka 端到端回放（2022-09-01 一天） | 48.4 万条 16 秒发完（约 3 万条/秒）；流作业消费条数与发送一致，写出 325 个片区、93,727 行，平均占用率：流计算 0.273，同一天离线小时表 0.271 | `docs/streaming_design.md` 第 7 节 |
 | 测试 | CI 文件模式 162 个通过、6 个跳过（Python 3.11 / 3.12），页面检查 20 个通过；另有 MySQL + Redis + API Compose 集成冒烟 | GitHub Actions run 44242115395（本优化分支） |
 
-## 3. 运行
+## 3. 快速开始
+
+准备 Git、Bash、Python 3.11 或 3.12（含 venv）、Docker 和 Docker Compose v2。以下命令在 Bash 中执行，Windows 可使用 Git Bash。
 
 ```bash
+git clone --branch codex/backend-hardening-2026-11-18 https://github.com/inkrhymes/sz-ev-charging.git
+cd sz-ev-charging
 cp .env.example .env
-MYSQL_DATA_DIR=$PWD/data/mysql bash scripts/start.sh   # MySQL 数据放在可持久的目录，重启不丢
-python3 scripts/smoke_live.py                          # 线上冒烟检查（8 项）
+# 首次使用仓库提供的本地演示配置。调整端口或凭据后重新加载自己的 .env。
+set -a
+source ./.env
+set +a
+bash scripts/start.sh
+docker compose ps
+curl -fsS "http://localhost:${API_PORT:-5000}/api/health"
 ```
 
-- `MYSQL_DATA_DIR`：MySQL 数据目录，建议指向持久目录。
-- `SKIP_DEMO_SEED=1`：跳过演示数据装载（库里已有全量数据时会自动跳过）。
-- `AUTH_DEMO_ENABLED=0` 默认关闭演示管理员登录；仅本地答辩演示需要工单/告警写操作时，才在私有 `.env` 中设为 `1`。该演示令牌不是生产认证，不能将服务直接暴露到公网。
-- `CORS_ALLOWED_ORIGINS`：逗号分隔的浏览器来源白名单；部署前端到其他域名时只添加可信来源，不要使用 `*`。
-- `API_SOURCE=file`：API 改读本机文件，不连 MySQL（默认 `mysql`）。
-- `API_STRICT_MYSQL=1`：MySQL 不可用时直接返回 503，不退回文件。
-- 打开 Redis 读缓存（可选，默认不开）：
-  ```bash
-  MYSQL_DATA_DIR=$PWD/data/mysql REDIS_URL=redis://redis:6379/0 docker compose --profile cache up -d --build redis api
-  ```
-  打开后响应头带 `X-Cache: HIT/MISS`。每天的 DAG 最后一步 `cache_flush` 会清掉 `szev:*` 缓存，新数据跑完马上能在页面看到；没设 `REDIS_URL` 时这一步什么也不做。
-- 重启后容器之间连不通时：`sudo sysctl -w net.bridge.bridge-nf-call-iptables=0`（`scripts/start.sh` 会尽量自动设置）。
-- Airflow：`docker compose -f orchestration/docker-compose.airflow.yml up -d`，详见 `docs/orchestration_design.md`。
-- 停止：`./scripts/stop.sh`（保留数据）/ `./scripts/stop.sh --purge`。
+启动脚本创建 Python 虚拟环境，启动 MySQL，执行建表和迁移，首次向空库装入演示数据，然后构建并启动 API。已有指标数据时会跳过演示数据装载。默认大屏地址为 <http://localhost:5000/>。健康检查应返回 `ok: true`，数据库模式下确认 `data.source` 为 `mysql` 且 `data.fallback` 为 `false`。
 
-### 3.1 后端代码结构与无虚拟机测试
+### 配置与排查
 
-本轮后端优化把原来集中在 `api/app.py` 的 HTTP 路由拆成三个模块，同时保留原有 URL 与 endpoint 名称：
+- MySQL 数据默认保存在 `data/mysql`。可通过 `MYSQL_DATA_DIR` 更改存储目录，用 `SKIP_DEMO_SEED=1` 跳过演示数据装载。
+- Redis 读缓存默认关闭。在自己的 `.env` 设置 `REDIS_URL=redis://redis:6379/0` 后，重新加载环境变量并运行启动脚本。执行 `docker compose exec redis redis-cli ping` 应得到 `PONG`。连续请求两次 `curl -si "http://localhost:${API_PORT:-5000}/api/zones"`，可查看 `X-Cache` 命中状态。`CACHE_VERSION` 控制缓存版本。
+- 设置 `API_TIMING_HEADER=1` 后重建 API 容器，可通过 `X-Response-Time-Ms` 观察请求耗时。`API_STRICT_MYSQL=1` 让读库失败返回 HTTP 503。
+- 演示登录默认关闭。仅在本地演示工单写操作时启用 `AUTH_DEMO_ENABLED=1`。大屏与 API 默认同源，分开部署时通过 `CORS_ALLOWED_ORIGINS` 指定前端来源。
+- 用 `docker compose port api 5000` 查看映射端口，用 `docker compose logs --tail=100 api mysql` 排查启动问题。用 `docker compose --profile cache down` 停止服务，MySQL 数据保存在宿主目录。
 
-```text
-api/
-├── app.py                 # Flask 启动、数据源/数据库/缓存公共能力
-└── routes/
-    ├── read.py            # 总览、片区、质量、预测等只读接口
-    ├── tickets.py         # 登录、工单接口
-    └── ops.py             # 站点、地图、告警接口
+### 后端与测试
+
+Docker 使用 Gunicorn 加载 `app:app`。默认使用一个 worker，以兼容文件演示模式中的进程内状态。读接口、工单和运维路由位于 `api/routes/`。公共请求处理位于 `api/utils/request_policy.py`，负责 CORS、计时、安全响应头和 1 MiB 请求体上限。超限请求返回 HTTP 413，未处理的 API 异常在服务端记录，客户端收到 HTTP 500 和 JSON 错误信息。
+
+在已激活的 Python 虚拟环境中运行文件模式测试：
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q tests
 ```
 
-这样后续新增接口时，可以按资源/业务域修改对应模块，不需要继续向单个 `app.py` 堆代码。数据访问 helper 暂时保留在 `app.py`，以减少一次性重构带来的兼容风险；后续可以继续拆成 `db.py` / `cache.py` / `services/`。
-
-**本地没有虚拟机也可以先做两层验证：**
-
-1. **文件模式：** `python -m pytest -q tests`，不依赖 MySQL/Redis。
-2. **真实容器链路：** GitHub Actions 自动启动 MySQL + Redis + API，验证真实数据库写入、Redis HIT/MISS 和 API 接口。当前优化分支已经通过这套 Compose 集成测试。
-
-另外，Docker API 使用“以模块方式导入 Flask app”的启动方式，避免路由拆分后 `python app.py` 与 `import app` 产生两份模块实例。
+GitHub Actions 在 Python 3.11 和 3.12 上运行测试，用 Playwright 验证大屏页面，并通过 Docker Compose 验证 MySQL 数据读取、工单写入与 Redis 缓存命中。Airflow 的独立启动流程见 [调度说明](docs/orchestration_design.md)。
 
 ## 4. 截图
 

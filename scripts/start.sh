@@ -58,7 +58,7 @@ docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-chara
 fi
 
 echo "[5/5] 启动 API 与大屏"
-if [ -n "$REDIS_URL" ]; then
+if [ -n "${REDIS_URL:-}" ]; then
   echo "  启动 Redis 缓存"
   docker compose up -d redis
   until docker exec sz-ev-redis redis-cli ping >/dev/null 2>&1; do sleep 1; done

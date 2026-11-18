@@ -38,6 +38,9 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-sz_ev}
       # 可选 Redis 读缓存：留空 = 不启用（默认）；开启见下面 redis 服务和 docs/perf/api_loadtest.md
       REDIS_URL: ${REDIS_URL:-}
+      CACHE_VERSION: ${CACHE_VERSION:-v2}
+      API_TIMING_HEADER: ${API_TIMING_HEADER:-0}
+      API_STRICT_MYSQL: ${API_STRICT_MYSQL:-0}
     ports:
       - "${API_PORT:-5000}:5000"
     volumes:

@@ -17,50 +17,14 @@ from urllib.parse import urlencode
 
 from flask import Flask, g, has_request_context, jsonify, request, send_from_directory
 
+from utils.request_policy import configure_http
+
 app = Flask(__name__)
+configure_http(app)
 
 REPO = Path(os.getenv("REPO_ROOT", str(Path(__file__).resolve().parents[1])))
 DWD = REPO / "data" / "demo" / "dwd"
 FORCE_MOCK = os.getenv("MOCK", "0") == "1"
-
-
-def _timing_header_enabled() -> bool:
-    return os.getenv("API_TIMING_HEADER", "").strip().lower() in ("1", "true", "yes", "on")
-
-
-@app.before_request
-def _request_timer():
-    if _timing_header_enabled():
-        import time as _t
-        g.request_started = _t.perf_counter()
-
-
-@app.after_request
-def _request_timing(resp):
-    started = getattr(g, "request_started", None)
-    if started is not None:
-        import time as _t
-        resp.headers["X-Response-Time-Ms"] = f"{(_t.perf_counter() - started) * 1000:.2f}"
-    return resp
-
-
-def _cors_allowed_origins() -> set[str]:
-    raw = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5096,http://127.0.0.1:5096")
-    return {origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()}
-
-
-@app.after_request
-def _cors(resp):
-    origin = request.headers.get("Origin")
-    allowed = _cors_allowed_origins()
-    if origin and (origin in allowed or "*" in allowed):
-        resp.headers["Access-Control-Allow-Origin"] = "*" if "*" in allowed else origin
-        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-        resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,PUT,DELETE,OPTIONS"
-        resp.headers["Access-Control-Max-Age"] = "600"
-        if "*" not in allowed:
-            resp.vary.add("Origin")
-    return resp
 
 
 def _in_range(ts: str) -> bool:
