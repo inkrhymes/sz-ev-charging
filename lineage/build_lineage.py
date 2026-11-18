@@ -179,10 +179,20 @@ def scan_api(my: set[str]):
                 idx.setdefault(n.name, n)
         modules.append((path, tree, idx, skip))
 
-    # appmod.foo / app.foo 是 route 模块访问 app.py 共享 helper 的约定。
+    # route 模块既可能使用 appmod._helper()，也可能直接 from app import helper。
     app_idx = next((idx for path, _tree, idx, _skip in modules if path == ROOT / "api" / "app.py"), {})
 
+    def imported_app_helpers(tree):
+        out = {}
+        for n in tree.body:
+            if isinstance(n, ast.ImportFrom) and n.module == "app":
+                for alias in n.names:
+                    if alias.name in app_idx:
+                        out[alias.asname or alias.name] = app_idx[alias.name]
+        return out
+
     for path, tree, idx, skip in modules:
+        imported = imported_app_helpers(tree)
         for route_path, method, fn in _routes(tree, idx):
             seen, todo, strs = set(), [(fn, idx)], []
             while todo:
@@ -191,10 +201,14 @@ def scan_api(my: set[str]):
                 if key in seen:
                     continue
                 seen.add(key)
-                strs += _strings(node, skip if node_idx is idx else _docstrings(ast.Module(body=[node], type_ignores=[])))
+                node_skip = skip if node_idx is idx else _docstrings(ast.Module(body=[node], type_ignores=[]))
+                strs += _strings(node, node_skip)
                 for nm in ast.walk(node):
-                    if isinstance(nm, ast.Name) and nm.id in node_idx:
-                        todo.append((node_idx[nm.id], node_idx))
+                    if isinstance(nm, ast.Name):
+                        if nm.id in node_idx:
+                            todo.append((node_idx[nm.id], node_idx))
+                        elif node_idx is idx and nm.id in imported:
+                            todo.append((imported[nm.id], app_idx))
                     elif isinstance(nm, ast.Attribute) and isinstance(nm.value, ast.Name) and nm.value.id in {"app", "appmod"} and nm.attr in app_idx:
                         todo.append((app_idx[nm.attr], app_idx))
             reads, writes = set(), set()
