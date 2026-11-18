@@ -317,9 +317,9 @@ def test_mobile_overview_navigation_and_metrics(browser):
     assert "0.0" in pg.locator("#kpis .kpi-val").nth(2).inner_text()
     assert "00:00" in pg.locator("#kpis .kpi-val").nth(3).inner_text()
     pg.locator("#ticketStat button[data-status=open]").click()
-    assert pg.locator("#view-tickets").is_visible()
+    pw.expect(pg.locator("#view-tickets")).to_be_visible()
     assert pg.locator("#ticketTabs .active").get_attribute("data-k") == "open"
     pg.select_option("#mobileRoute", "quality")
-    assert pg.locator("#view-quality").is_visible()
+    pw.expect(pg.locator("#view-quality")).to_be_visible()
     assert not probs["js"], probs["js"]
     pg.close()
