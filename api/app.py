@@ -417,24 +417,21 @@ def _forecast_window():
 
 
 def _mysql_forecast_preds(taz_id):
-    """MySQL 模式优先读每日生产预测表 ads_forecast_zone_hour（forecast/daily.py 写入）。
-    返回 ({(taz_id, ts_hour): {"y_hat_lgbm": ..}}, forecast_window)；表不存在/为空时返回 ({}, None)，调用方退回 predictions.csv。"""
+    """MySQL 模式优先读每日生产预测表，并复用当前请求的 MySQL 连接。"""
     try:
-        conn = _mysql_connect()
+        window_rows = _sql("SELECT MIN(ts_hour) AS t0, MAX(ts_hour) AS t1 FROM ads_forecast_zone_hour")
+        if not window_rows:
+            return {}, None
+        w = window_rows[0]
+        if not w.get("t0"):
+            return {}, None
+        rows = _sql("SELECT taz_id, ts_hour, y_hat_lgbm FROM ads_forecast_zone_hour WHERE taz_id=%s", (taz_id,))
+        if rows is None:
+            return {}, None
+    except MySQLUnavailable:
+        return {}, None
     except Exception:
         return {}, None
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT MIN(ts_hour) AS t0, MAX(ts_hour) AS t1 FROM ads_forecast_zone_hour")
-            w = cur.fetchone() or {}
-            if not w.get("t0"):
-                return {}, None
-            cur.execute("SELECT taz_id, ts_hour, y_hat_lgbm FROM ads_forecast_zone_hour WHERE taz_id=%s", (taz_id,))
-            rows = cur.fetchall()
-    except Exception:  # 表还没建（老库）→ 静默退回 predictions.csv
-        return {}, None
-    finally:
-        conn.close()
     preds = {(str(x["taz_id"]), _ts(x["ts_hour"])): {"y_hat_lgbm": x["y_hat_lgbm"]} for x in rows}
     return preds, {"from": _ts(w["t0"]), "to": _ts(w["t1"])}
 
@@ -607,26 +604,17 @@ def _lake_map():
 
 
 def _mysql_map():
-    """API_SOURCE=mysql（或 MAP_DB=mysql）时优先读库：dim_station（站点坐标）+ ads_zone_daily（片区日均、中心点，取最新一天）。连不上就返回 None。"""
+    """MySQL 地图数据：复用请求内连接，避免同一请求重复建立连接。"""
     if not _db_on("MAP_DB"):
         return None
-    try:
-        import pymysql
-        conn = pymysql.connect(host=os.getenv("MYSQL_HOST", "127.0.0.1"), port=int(os.getenv("MYSQL_PORT", "3306")),
-                               user=os.getenv("MYSQL_USER", "ev"), password=os.getenv("MYSQL_PASSWORD", "evpass"),
-                               database=os.getenv("MYSQL_DATABASE", "sz_ev"), charset="utf8mb4", init_command="SET time_zone='+08:00'", connect_timeout=3,
-                               cursorclass=pymysql.cursors.DictCursor)
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT station_id, taz_id, longitude, latitude, total_piles FROM dim_station")
-            si = cur.fetchall()
-            cur.execute("SELECT taz_id, avg_occupancy, station_cnt, pile_cnt, center_lon, center_lat FROM ads_zone_daily "
-                        "WHERE dt = (SELECT MAX(dt) FROM ads_zone_daily)")
-            zd = {str(r["taz_id"]): r for r in cur.fetchall()}
-    except Exception as e:
-        _mysql_failed(e)
+    si = _sql("SELECT station_id, taz_id, longitude, latitude, total_piles FROM dim_station")
+    zd_rows = _sql("SELECT taz_id, avg_occupancy, station_cnt, pile_cnt, center_lon, center_lat FROM ads_zone_daily "
+                   "WHERE dt = (SELECT MAX(dt) FROM ads_zone_daily)")
+    if si is None or zd_rows is None:
         return None
     if not si:
         return None
+    zd = {str(r["taz_id"]): r for r in zd_rows}
     f = lambda v: float(v) if v is not None else None
     stations, pos = [], defaultdict(lambda: [0.0, 0.0, 0, 0])
     for r in si:
@@ -721,7 +709,7 @@ def alerts_read() -> tuple[list[dict], str]:
     if con:
         try:
             with con, con.cursor() as cur:
-                cur.execute("SELECT * FROM dq_alert ORDER BY created_at DESC LIMIT 1000")
+                cur.execute("SELECT * FROM dq_alert ORDER BY created_at DESC, alert_id DESC LIMIT 1000")
                 return [_norm_alert(r) for r in cur.fetchall()], "mysql"
         except Exception as e:
             _mysql_failed(e)
