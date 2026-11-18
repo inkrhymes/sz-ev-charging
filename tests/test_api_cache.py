@@ -44,7 +44,7 @@ def test_hit_miss_and_params(m, monkeypatch):
     assert c.get("/api/overview?dt=2022-09-01").headers["X-Cache"] == "HIT"
     assert 0 < fr.ttl("szev:v2:file:/api/zones?") <= 60
     c.get("/api/realtime/zones")
-    assert 0 < fr.ttl("szev:file:/api/realtime/zones?") <= 5
+    assert 0 < fr.ttl("szev:v2:file:/api/realtime/zones?") <= 5
     assert "X-Cache" not in c.get("/api/health").headers                      # 不在缓存名单
     assert c.get("/api/map/hourly?date=bad").status_code == 400
     assert fr.get("szev:file:/api/map/hourly?date=bad") is None               # 非 200 不缓存
@@ -54,11 +54,11 @@ def test_write_invalidates(m, monkeypatch):
     fr = fakeredis.FakeRedis()
     monkeypatch.setenv("REDIS_URL", "redis://fake")
     monkeypatch.setattr(m, "_redis_client", fr)
-    fr.set("szev:file:/api/alerts?", b"{}"); fr.set("szev:file:/api/zones?", b"{}")
+    fr.set("szev:v2:file:/api/alerts?", b"{}"); fr.set("szev:v2:file:/api/zones?", b"{}")
     with m.app.test_request_context("/api/alerts/7/ack", method="PATCH"):
         resp = m.app.response_class("{}", status=200)
         m._cache_store(resp)
-    assert fr.get("szev:file:/api/alerts?") is None and fr.get("szev:file:/api/zones?") is not None
+    assert fr.get("szev:v2:file:/api/alerts?") is None and fr.get("szev:v2:file:/api/zones?") is not None
 
 
 def test_redis_down_falls_through(m, monkeypatch):
@@ -82,7 +82,7 @@ def test_cache_store_handles_redis_becoming_unavailable(m, monkeypatch):
     monkeypatch.setenv("REDIS_URL", "redis://fake")
     monkeypatch.setattr(m, "_redis", lambda: None)
     with m.app.test_request_context("/api/zones"):
-        m.g.cache_key = "szev:file:/api/zones?"
+        m.g.cache_key = "szev:v2:file:/api/zones?"
         resp = m.app.response_class('{"ok":true}', status=200, mimetype="application/json")
         out = m._cache_store(resp)
     assert out.headers["X-Cache"] == "MISS"

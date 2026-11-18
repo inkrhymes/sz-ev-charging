@@ -878,7 +878,7 @@ def _cache_store(resp):
             try:
                 r = _redis()
                 if r is not None:
-                    r.setex(key, _cache_ttl(request.path), resp.get_data())
+                    r.set(key, resp.get_data(), ex=_cache_ttl(request.path))
             except Exception as e:
                 _redis_failed(e)
     elif request.method in ("POST", "PATCH", "PUT", "DELETE") and resp.status_code < 400:
