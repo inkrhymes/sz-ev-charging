@@ -27,10 +27,11 @@ def test_hit_miss_and_params(m, monkeypatch):
     monkeypatch.setenv("REDIS_URL", "redis://fake")
     monkeypatch.setattr(m, "_redis_client", fr)
     c = m.app.test_client()
-    a = c.get("/api/zones")
-    b = c.get("/api/zones")
+    origin = {"Origin": "http://127.0.0.1:5096"}
+    a = c.get("/api/zones", headers=origin)
+    b = c.get("/api/zones", headers=origin)
     assert a.headers["X-Cache"] == "MISS" and b.headers["X-Cache"] == "HIT" and a.get_json() == b.get_json()
-    assert b.headers["Access-Control-Allow-Origin"] == "*"
+    assert b.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5096"
     assert c.get("/api/overview?dt=2022-09-01").headers["X-Cache"] == "MISS"
     assert c.get("/api/overview?dt=2022-09-02").headers["X-Cache"] == "MISS"   # 参数不同 → 不同 key
     assert c.get("/api/overview?dt=2022-09-01").headers["X-Cache"] == "HIT"
@@ -60,3 +61,11 @@ def test_redis_down_falls_through(m, monkeypatch):
     monkeypatch.setattr(m, "_redis_client", Broken())
     r = m.app.test_client().get("/api/zones")
     assert r.status_code == 200 and "X-Cache" not in r.headers
+
+
+
+def test_cache_key_urlencodes_query_values(m):
+    from urllib.parse import unquote
+    with m.app.test_request_context("/api/overview?dt=2022-09-01%26other%3Dvalue"):
+        key = m._cache_key("/api/overview")
+    assert "dt=2022-09-01%26other%3Dvalue" in key
