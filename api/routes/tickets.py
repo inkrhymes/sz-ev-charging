@@ -11,7 +11,8 @@ import os
 
 from flask import g, jsonify, request
 import app as appmod
-from app import alerts_store, alerts_write, demo_auth_enabled, tickets_store\nfrom utils.http import err, ok
+from app import alerts_store, alerts_write, demo_auth_enabled, tickets_store
+from utils.http import err, ok
 
 def tickets_list():
     used, rows = appmod._ticket_db_call(lambda cur: (cur.execute("SELECT * FROM ads_ticket ORDER BY ticket_id"), cur.fetchall())[1])

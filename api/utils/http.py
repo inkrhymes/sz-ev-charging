@@ -1,1 +1,39 @@
-"""Shared HTTP helpers for the Flask API.\n\nKept dependency-light so route modules do not need to import the application\nbootstrap module just to build a standard response or parse JSON.\n"""\n\nfrom flask import jsonify, request\n\n\ndef ok(data):\n    return jsonify({"ok": True, "data": data})\n\n\ndef err(msg, code=400):\n    return jsonify({"ok": False, "error": msg}), code\n\n\ndef json_body():\n    body = request.get_json(silent=True)\n    if not isinstance(body, dict):\n        return None, err("请求体必须是 JSON 对象")\n    return body, None\n\n\ndef positive_int(value):\n    if isinstance(value, bool):\n        return None\n    if isinstance(value, int):\n        number = value\n    elif isinstance(value, float) and value.is_integer():\n        number = int(value)\n    elif isinstance(value, str) and value.strip().isdecimal():\n        try:\n            number = int(value.strip())\n        except ValueError:\n            return None\n    else:\n        return None\n    return number if number > 0 else None\n
+"""Shared HTTP helpers for the Flask API.
+
+Kept dependency-light so route modules do not need to import the application
+bootstrap module just to build a standard response or parse JSON.
+"""
+
+from flask import jsonify, request
+
+
+def ok(data):
+    return jsonify({"ok": True, "data": data})
+
+
+def err(msg, code=400):
+    return jsonify({"ok": False, "error": msg}), code
+
+
+def json_body():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None, err("请求体必须是 JSON 对象")
+    return body, None
+
+
+def positive_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float) and value.is_integer():
+        number = int(value)
+    elif isinstance(value, str) and value.strip().isdecimal():
+        try:
+            number = int(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    return number if number > 0 else None

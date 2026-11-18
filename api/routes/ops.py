@@ -11,7 +11,8 @@ import os
 
 from flask import g, jsonify, request
 import app as appmod
-from app import ALERT_STATES, REPO, alerts_read, alerts_write, use_file, use_mysql\nfrom utils.http import err, ok
+from app import ALERT_STATES, REPO, alerts_read, alerts_write, use_file, use_mysql
+from utils.http import err, ok
 
 def stations():
     """站点明细：?status=stuck|high_missing|normal &taz_id= &sort=avg_occupancy|missing_rate|station_id &order=asc|desc &page=1 &page_size=10"""

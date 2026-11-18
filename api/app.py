@@ -85,7 +85,14 @@ def _api_fallback(_any):
     return jsonify({"ok": False, "error": f"接口不存在：/api/{_any}（服务端可能还是旧版本）"}), 404
 
 
-from utils.http import err, ok, json_body, positive_int\n\n# Compatibility aliases retained for existing tests/integrations.\n_json_body = json_body\n_positive_int = positive_int\n\n\ndef _has_dwd() -> bool:
+from utils.http import err, ok, json_body, positive_int
+
+# Compatibility aliases retained for existing tests/integrations.
+_json_body = json_body
+_positive_int = positive_int
+
+
+def _has_dwd() -> bool:
     return (DWD / "dwd_quality_station.csv").is_file() and (DWD / "dwd_zone_hour.csv").is_file()
 
 
