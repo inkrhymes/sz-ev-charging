@@ -24,6 +24,26 @@ DWD = REPO / "data" / "demo" / "dwd"
 FORCE_MOCK = os.getenv("MOCK", "0") == "1"
 
 
+def _timing_header_enabled() -> bool:
+    return os.getenv("API_TIMING_HEADER", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+@app.before_request
+def _request_timer():
+    if _timing_header_enabled():
+        import time as _t
+        g.request_started = _t.perf_counter()
+
+
+@app.after_request
+def _request_timing(resp):
+    started = getattr(g, "request_started", None)
+    if started is not None:
+        import time as _t
+        resp.headers["X-Response-Time-Ms"] = f"{(_t.perf_counter() - started) * 1000:.2f}"
+    return resp
+
+
 def _cors_allowed_origins() -> set[str]:
     raw = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5096,http://127.0.0.1:5096")
     return {origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()}
@@ -780,6 +800,8 @@ CACHE_TTL = {  # 秒；可用 CACHE_TTL_DEFAULT 整体覆盖历史类接口
 CACHE_HISTORY = {"/api/overview", "/api/zones", "/api/zone/series", "/api/quality", "/api/map/zones", "/api/map/hourly",
                  "/api/site/suggest", "/api/forecast/metrics", "/api/baseline", "/api/data_range", "/api/stations"}
 CACHE_INVALIDATE = {"/api/alerts": ("/api/alerts", "/api/tickets", "/api/overview"), "/api/tickets": ("/api/tickets", "/api/alerts")}
+# 发布新后端版本时可递增，避免旧版本缓存结构被新代码误读。
+CACHE_VERSION = os.getenv("CACHE_VERSION", "v2")
 _redis_client = None
 _redis_down_until = 0.0
 
@@ -821,7 +843,7 @@ def _redis_failed(e):
 
 def _cache_key(path: str) -> str:
     args = urlencode([(k, v) for k, values in sorted(request.args.lists()) for v in values])
-    return f"szev:{'mysql' if use_mysql() else 'file'}:{path}?{args}"
+    return f"szev:{CACHE_VERSION}:{'mysql' if use_mysql() else 'file'}:{path}?{args}"
 
 
 @app.before_request

@@ -17,6 +17,13 @@ def m(monkeypatch):
     return mod
 
 
+def test_timing_header_opt_in(m, monkeypatch):
+    monkeypatch.setenv("API_TIMING_HEADER", "1")
+    r = m.app.test_client().get("/api/health")
+    assert r.status_code == 200 and "X-Response-Time-Ms" in r.headers
+    assert float(r.headers["X-Response-Time-Ms"]) >= 0
+
+
 def test_no_redis_unchanged(m):
     r = m.app.test_client().get("/api/zones")
     assert r.status_code == 200 and "X-Cache" not in r.headers
@@ -35,7 +42,7 @@ def test_hit_miss_and_params(m, monkeypatch):
     assert c.get("/api/overview?dt=2022-09-01").headers["X-Cache"] == "MISS"
     assert c.get("/api/overview?dt=2022-09-02").headers["X-Cache"] == "MISS"   # 参数不同 → 不同 key
     assert c.get("/api/overview?dt=2022-09-01").headers["X-Cache"] == "HIT"
-    assert 0 < fr.ttl("szev:file:/api/zones?") <= 60
+    assert 0 < fr.ttl("szev:v2:file:/api/zones?") <= 60
     c.get("/api/realtime/zones")
     assert 0 < fr.ttl("szev:file:/api/realtime/zones?") <= 5
     assert "X-Cache" not in c.get("/api/health").headers                      # 不在缓存名单
