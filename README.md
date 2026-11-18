@@ -53,6 +53,8 @@ python3 scripts/smoke_live.py                          # 线上冒烟检查（8 
 
 - `MYSQL_DATA_DIR`：MySQL 数据目录，建议指向持久目录。
 - `SKIP_DEMO_SEED=1`：跳过演示数据装载（库里已有全量数据时会自动跳过）。
+- `AUTH_DEMO_ENABLED=0` 默认关闭演示管理员登录；仅本地答辩演示需要工单/告警写操作时，才在私有 `.env` 中设为 `1`。该演示令牌不是生产认证，不能将服务直接暴露到公网。
+- `CORS_ALLOWED_ORIGINS`：逗号分隔的浏览器来源白名单；部署前端到其他域名时只添加可信来源，不要使用 `*`。
 - `API_SOURCE=file`：API 改读本机文件，不连 MySQL（默认 `mysql`）。
 - `API_STRICT_MYSQL=1`：MySQL 不可用时直接返回 503，不退回文件。
 - 打开 Redis 读缓存（可选，默认不开）：

@@ -186,3 +186,71 @@ def test_realtime_zones(app_mod, monkeypatch):
     assert r.headers.get("X-Data-Source") == "mysql"
     monkeypatch.setenv("API_SOURCE", "file")
     assert data(c.get("/api/realtime/zones"))["zones"] == []
+
+
+def test_sql_reuses_one_connection_per_request(app_mod, monkeypatch):
+    connections = []
+
+    class Cursor:
+        def __init__(self):
+            self.query = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, query, args=()):
+            self.query = query
+
+        def fetchall(self):
+            return [{"query": self.query}]
+
+    class Conn:
+        def __init__(self):
+            self.closed = 0
+            connections.append(self)
+
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            self.closed += 1
+
+    monkeypatch.setattr(app_mod, "_mysql_connect", Conn)
+    with app_mod.app.test_request_context("/api/ops/health_metrics"):
+        assert app_mod._sql("SELECT 1") == [{"query": "SELECT 1"}]
+        assert app_mod._sql("SELECT 2") == [{"query": "SELECT 2"}]
+        assert len(connections) == 1 and connections[0].closed == 0
+    assert connections[0].closed == 1
+
+
+def test_mysql_ticket_write_failure_does_not_fallback_to_memory(app_mod, monkeypatch):
+    monkeypatch.setenv("ALERT_DB", "mysql")
+    monkeypatch.setattr(app_mod, "_alert_db", lambda: None)
+    app_mod._TICKETS = [{"ticket_id": 1, "station_id": "1554", "type": "repair", "status": "open"}]
+    r = app_mod.app.test_client().patch("/api/tickets/1", json={"status": "done"},
+                                        headers={"Authorization": "Bearer demo-admin"})
+    assert r.status_code == 503
+    assert app_mod._TICKETS[0]["status"] == "open"
+
+
+def test_mysql_alert_write_failure_does_not_fallback_to_memory(app_mod, monkeypatch):
+    monkeypatch.setenv("ALERT_DB", "mysql")
+    monkeypatch.setattr(app_mod, "_alert_db", lambda: None)
+    app_mod._ALERTS = [{"alert_id": 1, "status": "open", "note": ""}]
+    r = app_mod.app.test_client().patch("/api/alerts/1", json={"status": "ack"},
+                                        headers={"Authorization": "Bearer demo-admin"})
+    assert r.status_code == 503
+    assert app_mod._ALERTS[0]["status"] == "open"
+
+
+def test_mysql_ticket_create_failure_does_not_create_memory_ticket(app_mod, monkeypatch):
+    monkeypatch.setenv("ALERT_DB", "mysql")
+    monkeypatch.setattr(app_mod, "_alert_db", lambda: None)
+    app_mod._TICKETS = []
+    r = app_mod.app.test_client().post("/api/tickets", json={"station_id": "1554"},
+                                       headers={"Authorization": "Bearer demo-admin"})
+    assert r.status_code == 503
+    assert app_mod._TICKETS == []
