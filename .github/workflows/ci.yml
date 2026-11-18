@@ -63,9 +63,10 @@ jobs:
           test -n "$TICKET_ID"
           PATCH_JSON=$(curl -fsS -X PATCH "$B/api/tickets/$TICKET_ID" -H 'Content-Type: application/json' -H 'Authorization: Bearer demo-admin' -d '{"status":"processing"}')
           test "$(printf '%s' "$PATCH_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["status"])')" = processing
-          # Redis：第一次 MISS、第二次 HIT，确认缓存真的来自共享 Redis。
-          curl -fsS -D /tmp/z1.headers -o /tmp/z1.json "$B/api/zones"
-          curl -fsS -D /tmp/z2.headers -o /tmp/z2.json "$B/api/zones"
+          # Redis：清空专用 CI 缓存后，第一次 MISS、第二次 HIT。
+          docker exec sz-ev-redis redis-cli FLUSHDB
+          curl -fsS -D /tmp/z1.headers -o /tmp/z1.json "$B/api/zones?cache_probe=ci"
+          curl -fsS -D /tmp/z2.headers -o /tmp/z2.json "$B/api/zones?cache_probe=ci"
           grep -qi '^X-Cache: MISS' /tmp/z1.headers
           grep -qi '^X-Cache: HIT' /tmp/z2.headers
       - name: logs on failure
