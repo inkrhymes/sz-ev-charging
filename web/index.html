@@ -10,7 +10,7 @@
       --primary-6:#165DFF; --primary-1:#E8F3FF; --primary-5:#4080FF; --primary-7:#0E42D2;
       --success-6:#00B42A; --success-1:#E8FFEA; --warning-6:#FF7D00; --warning-1:#FFF7E8;
       --danger-6:#F53F3F; --danger-1:#FFECE8;
-      --text-1:#1D2129; --text-2:#4E5969; --text-3:#86909C; --text-4:#C9CDD4;
+      --text-1:#1D2129; --text-2:#4E5969; --text-3:#657386; --text-4:#C9CDD4;
       --border:#E5E6EB; --fill-1:#F7F8FA; --fill-2:#F2F3F5; --bg-white:#FFFFFF;
       --side-w:220px;
     }
@@ -51,6 +51,8 @@
     .nav { list-style:none; margin:0; padding:0 8px; }
     .nav li { position:relative; height:40px; display:flex; align-items:center; gap:12px; padding:0 12px; margin:4px 0; border-radius:2px;
               color:var(--text-2); cursor:pointer; white-space:nowrap; transition:background .15s, color .15s; }
+    .nav li > a { display:flex; align-items:center; gap:12px; color:inherit; width:100%; height:100%; }
+    body.folded .nav li > a { justify-content:center; }
     .nav li:hover { background:var(--fill-1); }
     .nav li.active { background:var(--primary-1); color:var(--primary-6); }
     .nav li.active::before { content:""; position:absolute; left:-8px; top:8px; bottom:8px; width:3px; background:var(--primary-6); }
@@ -66,13 +68,13 @@
     .main-inner { max-width:1600px; margin:0 auto; }
     .crumb { color:var(--text-3); margin-bottom:8px; } .crumb b { color:var(--text-1); font-weight:400; }
     .page-head { margin-bottom:16px; }
-    .page-head h1 { margin:0; font-size:20px; line-height:28px; font-weight:500; }
+    .page-head h1 { margin:0; font-size:24px; line-height:32px; font-weight:650; }
     .page-head p { margin:4px 0 0; font-size:12px; line-height:20px; color:var(--text-3); }
     .view { display:none; } .view.active { display:block; }
 
     .grid { display:grid; grid-template-columns:repeat(24,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
     .col-24{grid-column:span 24}.col-16{grid-column:span 16}.col-12{grid-column:span 12}.col-8{grid-column:span 8}.col-6{grid-column:span 6}.col-4{grid-column:span 4}
-    .card { background:var(--bg-white); border:1px solid var(--border); border-radius:4px; min-width:0; }
+    .card { background:var(--bg-white); border:1px solid var(--border); border-radius:10px; min-width:0; }
     .card-head { display:flex; align-items:center; justify-content:space-between; padding:16px 20px 0; }
     .card-title { font-size:16px; line-height:24px; font-weight:500; display:flex; align-items:center; gap:6px; }
     .card-extra { font-size:12px; color:var(--text-3); }
@@ -143,10 +145,21 @@
     .tabs div.active { color:var(--primary-6); font-weight:500; }
     .tabs div.active::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--primary-6); }
     .tabs em { font-style:normal; color:var(--text-3); margin-left:4px; }
-    .stat-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-    .stat-list div { padding:12px 16px; background:var(--fill-1); border-radius:2px; }
-    .stat-list b { display:block; font-size:20px; line-height:28px; font-weight:600; }
-    .stat-list span { font-size:12px; color:var(--text-3); }
+    .ticket-legend { display:flex; gap:16px; margin:4px 0 14px; color:var(--text-2); font-size:12px; }
+    .ticket-legend span::before { content:""; display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; background:#2467bc; }
+    .ticket-legend span:nth-child(2)::before { background:#218477; }
+    .ticket-legend span:nth-child(3)::before { background:#707d90; }
+    .ticket-row { display:block; width:100%; border:0; border-top:1px solid var(--border); background:white; text-align:left; padding:12px 2px; font:inherit; color:var(--text-2); cursor:pointer; }
+    .ticket-row:hover { background:var(--fill-1); }
+    .ticket-row strong { float:right; color:var(--text-1); font-variant-numeric:tabular-nums; }
+    .ticket-track { display:flex; height:8px; overflow:hidden; background:#edf1f5; border-radius:4px; margin:7px 0 3px; }
+    .ticket-track i:nth-child(1) { background:#2467bc; }
+    .ticket-track i:nth-child(2) { background:#218477; }
+    .ticket-track i:nth-child(3) { background:#707d90; }
+    .ticket-row small, #ticketEmpty { color:var(--text-3); }
+    #mobileRoute, .brand-short { display:none; }
+    :focus-visible { outline:2px solid var(--primary-6); outline-offset:2px; }
+
     .readonly-note { font-size:12px; color:var(--text-3); }
 
     /* modal + toast */
@@ -163,7 +176,25 @@
 
     @media (max-width:1439px) { .kpis6 > .col-4 { grid-column:span 8; } }
     @media (max-width:1100px) { .grid > .col-12, .grid > .col-16, .grid > .col-8 { grid-column:span 24; } .kpis6 > .col-4 { grid-column:span 8; } }
-    @media (max-width:640px) { .grid > [class*="col-"] { grid-column:span 24 !important; } .top-right .hide-sm { display:none; } }
+    @media (max-width:700px) {
+      .sider, .crumb, .top-right .hide-sm, #userName { display:none; }
+      .main { margin-left:0; padding:72px 12px 24px; }
+      .topbar { padding:0 12px; gap:10px; }
+      .brand { flex:1; gap:6px; }
+      .brand-name { display:none; }
+      .brand-short { display:inline; white-space:normal; font-size:14px; line-height:18px; }
+      .top-right { gap:8px; }
+      #mobileRoute { display:block; margin-bottom:12px; max-width:100%; }
+      .grid { gap:10px; }
+      .grid > [class*="col-"] { grid-column:span 24; }
+      #kpis > .kpi { grid-column:span 12; height:auto; padding:12px; }
+      .kpi-val { font-size:24px; }
+      .card-body { padding:12px; overflow-x:auto; }
+      .card-head { padding:14px 12px 0; flex-wrap:wrap; gap:4px 10px; }
+      .filter .f, .pager, .tabs { flex-wrap:wrap; }
+      .tabs { gap:12px; }
+      .modal { max-width:calc(100vw - 24px); }
+    }
   </style>
 </head>
 <body>
@@ -181,7 +212,7 @@
   </svg>
 
   <header class="topbar">
-    <div class="brand"><span class="mark"><svg class="ic"><use href="#i-bolt"/></svg></span>深圳市电动汽车充电站运行管理可视化系统</div>
+    <div class="brand"><span class="mark"><svg class="ic"><use href="#i-bolt"/></svg></span><span class="brand-name">深圳市电动汽车充电站运行管理可视化系统</span><span class="brand-short">深圳充电站</span></div>
     <div class="top-right">
       <span class="hide-sm" id="dataRange">数据时间：2022-09-01 至 2022-09-14</span>
       <span id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">当前：连接中</span></span>
@@ -197,7 +228,7 @@
     </div>
   </header>
 
-  <aside class="sider">
+  <aside class="sider" aria-label="主导航">
     <div class="group">运行监控</div>
     <ul class="nav">
       <li data-route="overview"><svg class="ic"><use href="#i-dash"/></svg><span>运行总览</span></li>
@@ -218,6 +249,7 @@
   </aside>
 
   <main class="main"><div class="main-inner">
+    <select id="mobileRoute" aria-label="切换页面"></select>
     <div class="crumb"><span id="crumbGroup">运行监控</span> / <b id="crumbCur">运行总览</b></div>
     <div class="page-head"><h1 id="pageTitle">运行总览</h1><p id="pageDesc"></p></div>
 
@@ -228,8 +260,8 @@
       <div class="grid">
         <div class="card col-16"><div class="card-head"><div class="card-title">片区占用率趋势<span class="tip" data-tip="这个片区里，每小时平均有多少桩在用"><svg class="ic"><use href="#i-info"/></svg></span></div><div class="card-extra" id="ovSeriesExtra"></div></div>
           <div class="card-body"><div id="chartOverview" class="chart-main"></div></div></div>
-        <div class="card col-8"><div class="card-head"><div class="card-title">工单概况<span class="tip" data-tip="数据异常时自动开的巡检、维修单"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="tickets">查看全部</a></div>
-          <div class="card-body"><div class="stat-list" id="ticketStat"></div><div id="chartTicket" class="chart-sub" style="height:236px"></div></div></div>
+        <div class="card col-8"><div class="card-head"><div class="card-title">工单概况<span class="tip" data-tip="数据异常时自动开的巡检、维修单"><svg class="ic"><use href="#i-info"/></svg></span></div><a href="#/tickets" id="allTickets">查看全部</a></div>
+          <div class="card-body"><div class="ticket-legend"><span>维修</span><span>巡检</span><span id="otherType" hidden>其他</span></div><div id="ticketStat"></div><p id="ticketEmpty" hidden>暂无工单</p></div></div>
       </div>
       <div class="card"><div class="card-head"><div class="card-title">待关注站<span class="tip" data-tip="读数异常或缺数偏多、建议开单的站"><svg class="ic"><use href="#i-info"/></svg></span></div><a data-go="quality">查看异常站</a></div>
         <div class="card-body"><table><thead><tr><th>站</th><th>片区</th><th>问题</th><th class="num">缺数比例</th><th class="num">最长断档（天）</th><th>建议工单</th></tr></thead><tbody id="ovStationBody"></tbody></table></div></div>
@@ -402,7 +434,9 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const API_BASE = localStorage.getItem("API_BASE") || "http://127.0.0.1:5000";
+    const defaultApi = location.protocol === "file:" ? "http://127.0.0.1:5000"
+      : (location.port === "5096" || location.pathname.endsWith("/index.html")) ? location.protocol + "//" + location.hostname + ":5000" : location.origin;
+    const API_BASE = localStorage.getItem("API_BASE") || defaultApi;
     const FALLBACK = {
       overview: { dt: "2022-09-01", station_cnt: 25, zone_cnt: 23, avg_occupancy: 0.42, peak_hour: 19, stuck_cnt: 4, high_missing_cnt: 6 },
       series: (() => {
@@ -455,7 +489,7 @@
     const STATUS = { open: ["待处理", "danger"], processing: ["处理中", "warning"], done: ["已完成", "success"] };
     const NEXT_LABEL = { open: "开始处理", processing: "标记完成" };
     const ROUTES = {
-      overview: ["运行监控", "运行总览", "今天全市充电站跑得怎么样、有哪些工单"],
+      overview: ["运行监控", "运行总览", "查看数据日期内的充电站占用情况和待处理工单"],
       zone: ["运行监控", "片区分析", "按片区看每小时占用和负荷，可以选日期"],
       baseline: ["运行监控", "和上小时比", "实际占用和上一小时参考值差多少"],
       lineage: ["数据治理", "数据关系", "每张表的数据从哪来、又被哪些表和接口用到"],
@@ -485,7 +519,7 @@
     });
     const $ = id => document.getElementById(id);
     const charts = {};
-    ["chartOverview", "chartTicket", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite", "chartFcDaily", "chartRt", "chartLineage"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
+    ["chartOverview", "chartSeries", "chartBaseline", "chartErr", "chartMap", "chartSite", "chartFcDaily", "chartRt", "chartLineage"].forEach(id => charts[id] = echarts.init($(id), "arcoLight"));
     const resizeAll = () => Object.values(charts).forEach(c => c.resize());
     const pct = v => (v * 100).toFixed(0) + "%";
     const tsLabel = ts => ts.slice(5, 16);   // MM-DD HH:mm
@@ -513,12 +547,14 @@
 
     /* ---------- 运行总览 ---------- */
     function renderKpis(o, validZones) {
-      const zoneVal = validZones != null ? `${o.zone_cnt}<small>个（${validZones} 个有效）</small>` : `${o.zone_cnt}<small>个</small>`;
+      const zoneVal = `${o.zone_cnt ?? "暂无"}<small>个</small>`;
+      const peak = o.peak_hour == null ? "暂无" : `${String(o.peak_hour).padStart(2, "0")}:00`;
+      const occupancy = o.avg_occupancy == null ? "暂无" : `${(o.avg_occupancy * 100).toFixed(1)}<small>%</small>`;
       const items = [
         ["接入站", `${o.station_cnt}<small>座</small>`, "", `数据日期 ${o.dt || "-"}`, "接入本系统的站"],
         ["覆盖片区", zoneVal, "", validZones != null ? `其中 ${validZones} 个有完整曲线` : "按片区看覆盖", "按片区划分；有的片区暂时没有站数据"],
-        ["平均占用率", `${((o.avg_occupancy || 0) * 100).toFixed(1)}<small>%</small>`, "", `峰值时段 ${String(o.peak_hour).padStart(2, "0")}:00`, "当天所有站平均占用"],
-        ["峰值时段", `${String(o.peak_hour).padStart(2, "0")}:00`, "", "当日平均占用率最高的小时", "一天里占用最高的那个小时"],
+        ["平均占用率", occupancy, "", "数据日期内的平均值", "当天所有站平均占用"],
+        ["峰值时段", peak, "", "当日占用率最高时", "一天里占用最高的那个小时"],
         ["读数异常", `${o.stuck_cnt}<small>座</small>`, "danger", "建议检查采集设备", "连续多个时段读数一直不动的站"],
         ["缺数偏多", `${o.high_missing_cnt}<small>座</small>`, "warning", "缺数超过三成", "缺数超过三成的站"],
       ];
@@ -538,11 +574,12 @@
       const pts = data.points || [];
       seriesPts = pts; seriesTaz = data.taz_id || ""; seriesPage = 1;
       const x = pts.map(p => tsLabel(p.ts_hour));
-      $("ovSeriesExtra").textContent = `片区 ${seriesTaz || "-"}`;
+      $("ovSeriesExtra").textContent = `片区 ${seriesTaz || "-"} · ${pts.length ? x[0] + " 至 " + x[x.length - 1] : "暂无小时数据"}`;
       $("seriesExtra").textContent = `片区 ${seriesTaz || "-"} · ${pts.length} 个小时点`;
       charts.chartOverview.setOption({
         tooltip: { valueFormatter: v => (v * 100).toFixed(1) + "%" },
-        xAxis: { type: "category", data: x, boundaryGap: false },
+        grid: { left: 46, right: 20, top: 24, bottom: 40 },
+        xAxis: { type: "category", data: x, boundaryGap: false, axisLabel: { hideOverlap: true } },
         yAxis: autoOccAxis(),
         series: [{ name: "占用率", type: "line", data: pts.map(p => p.occupancy), areaStyle: { color: "rgba(22,93,255,0.08)" } }],
       }, true);
@@ -859,20 +896,28 @@
       body.querySelectorAll("a[data-id]").forEach(a => a.onclick = () => advanceTicket(+a.dataset.id, ticketList));
       pager($("ticketPager"), shown.length, 1, 10, () => {});
       // 总览页工单概况
-      $("ticketStat").innerHTML = [["open", "待处理"], ["processing", "处理中"], ["done", "已完成"]]
-        .map(([k, n]) => `<div><b class="num" style="color:var(--${STATUS[k][1]}-6)">${cnt(k)}</b><span>${n}</span></div>`).join("");
-      const types = Object.keys(TYPE_CN);
-      charts.chartTicket.setOption({
-        tooltip: { axisPointer: { type: "shadow" } },
-        legend: { data: types.map(k => TYPE_CN[k]) },
-        grid: { left: 32, right: 8, top: 40, bottom: 24 },
-        xAxis: { type: "category", data: ["待处理", "处理中", "已完成"] },
-        yAxis: { type: "value", minInterval: 1 },
-        series: types.map((k, i) => ({ name: TYPE_CN[k], type: "bar", stack: "t", data: ["open", "processing", "done"].map(s => ticketList.filter(t => t.type === k && t.status === s).length),
-                                        itemStyle: { color: i ? "#14C9C9" : "#165DFF", borderRadius: 0 } })),
-        // 没有工单时图上直接写「暂无工单」，不画空柱子
-        graphic: ticketList.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: "暂无工单", fill: "#86909C", fontSize: 14 } }],
-      }, true);
+      const rows = Object.keys(STATUS).map(status => {
+        const tickets = ticketList.filter(ticket => ticket.status === status);
+        const repair = tickets.filter(ticket => ticket.type === "repair").length;
+        const inspect = tickets.filter(ticket => ticket.type === "inspect").length;
+        return { status, total: tickets.length, counts: [repair, inspect, tickets.length - repair - inspect] };
+      });
+      const max = Math.max(1, ...rows.map(row => row.total));
+      $("otherType").hidden = !rows.some(row => row.counts[2]);
+      $("ticketEmpty").hidden = ticketList.length > 0;
+      $("ticketStat").innerHTML = rows.map(({ status, total, counts }) => {
+        const bars = counts.map(n => `<i style="width:${100 * n / max}%"></i>`).join("");
+        const detail = `维修 ${counts[0]} · 巡检 ${counts[1]}` + (counts[2] ? ` · 其他 ${counts[2]}` : "");
+        return `<button type="button" class="ticket-row" data-status="${status}">${STATUS[status][0]}<strong>${total} 单</strong>
+          <span class="ticket-track" aria-hidden="true">${bars}</span><small>${detail}</small></button>`;
+      }).join("");
+      $("ticketStat").querySelectorAll("button").forEach(button => {
+        button.onclick = () => {
+          ticketFilter = button.dataset.status;
+          renderTickets(ticketList);
+          go("tickets");
+        };
+      });
     }
 
     async function advanceTicket(id, list) {
@@ -1488,6 +1533,7 @@
       let r = (location.hash.match(/^#\/(\w+)/) || [])[1];
       if (!ROUTES[r]) r = "overview";
       const [g, n, d] = ROUTES[r];
+      $("mobileRoute").value = r;
       document.querySelectorAll(".nav li").forEach(li => li.classList.toggle("active", li.dataset.route === r));
       document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + r));
       $("crumbGroup").textContent = g; $("crumbCur").textContent = n; $("pageTitle").textContent = n; $("pageDesc").textContent = d;
@@ -1498,10 +1544,29 @@
       if (r === "realtime") rtStart(); else rtStop();
     }
     const go = r => { location.hash = "#/" + r; };
-    document.querySelectorAll(".nav li").forEach(li => li.onclick = () => go(li.dataset.route));
+    document.querySelectorAll(".sider .nav").forEach(list => {
+      const group = document.createElement("optgroup");
+      group.label = list.previousElementSibling.textContent;
+      list.querySelectorAll("li").forEach(li => {
+        const label = li.textContent.trim();
+        group.append(new Option(label, li.dataset.route));
+        const link = document.createElement("a");
+        link.href = "#/" + li.dataset.route;
+        link.setAttribute("aria-label", label);
+        link.title = label;
+        link.append(...li.childNodes);
+        li.append(link);
+      });
+      $("mobileRoute").append(group);
+    });
+    $("allTickets").onclick = () => {
+      ticketFilter = "all";
+      renderTickets(ticketList);
+    };
+    $("mobileRoute").onchange = e => go(e.target.value);
     document.querySelectorAll("[data-go]").forEach(a => a.onclick = () => go(a.dataset.go));
     window.addEventListener("hashchange", route);
-    const autoFold = () => document.body.classList.toggle("folded", localStorage.getItem("SIDER_FOLD") === "1" || window.innerWidth < 1100);
+    const autoFold = () => document.body.classList.toggle("folded", (localStorage.getItem("SIDER_FOLD") ?? (window.innerWidth < 1100 ? "1" : "0")) === "1");
     $("btnFold").onclick = () => { localStorage.setItem("SIDER_FOLD", document.body.classList.contains("folded") ? "0" : "1"); autoFold(); setTimeout(resizeAll, 170); };
 
     /* ---------- 用户菜单 / 登录 ---------- */
