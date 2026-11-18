@@ -13,8 +13,9 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlencode
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, has_request_context, jsonify, request, send_from_directory
 
 app = Flask(__name__)
 
@@ -23,11 +24,22 @@ DWD = REPO / "data" / "demo" / "dwd"
 FORCE_MOCK = os.getenv("MOCK", "0") == "1"
 
 
+def _cors_allowed_origins() -> set[str]:
+    raw = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5096,http://127.0.0.1:5096")
+    return {origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()}
+
+
 @app.after_request
 def _cors(resp):
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,OPTIONS"
+    origin = request.headers.get("Origin")
+    allowed = _cors_allowed_origins()
+    if origin and (origin in allowed or "*" in allowed):
+        resp.headers["Access-Control-Allow-Origin"] = "*" if "*" in allowed else origin
+        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,PUT,DELETE,OPTIONS"
+        resp.headers["Access-Control-Max-Age"] = "600"
+        if "*" not in allowed:
+            resp.vary.add("Origin")
     return resp
 
 
@@ -61,6 +73,30 @@ def err(msg, code=400):
     return jsonify({"ok": False, "error": msg}), code
 
 
+def _json_body():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None, err("请求体必须是 JSON 对象")
+    return body, None
+
+
+def _positive_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float) and value.is_integer():
+        number = int(value)
+    elif isinstance(value, str) and value.strip().isdecimal():
+        try:
+            number = int(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    return number if number > 0 else None
+
+
 def _has_dwd() -> bool:
     return (DWD / "dwd_quality_station.csv").is_file() and (DWD / "dwd_zone_hour.csv").is_file()
 
@@ -82,6 +118,10 @@ def _db_on(override: str) -> bool:
 
 class MySQLUnavailable(Exception):
     """API_STRICT_MYSQL=1 时 MySQL 不可用，直接 503，不退回文件。"""
+
+
+class MySQLWriteUnavailable(MySQLUnavailable):
+    """MySQL 写失败时拒绝写入，不回退到进程内存。"""
 
 
 def strict_mysql() -> bool:
@@ -106,6 +146,12 @@ def _on_mysql_unavailable(e):
                     "source": "mysql", "fallback": False, "mysql_error": str(e)}), 503
 
 
+@app.errorhandler(MySQLWriteUnavailable)
+def _on_mysql_write_unavailable(_e):
+    return jsonify({"ok": False, "error": "MySQL 不可用，写操作已拒绝；未切换到内存存储，请检查数据库连接后重试",
+                    "source": "mysql", "fallback": False}), 503
+
+
 @app.after_request
 def _data_source_headers(resp):
     """MySQL 模式下每个 /api 响应都带上实际数据源，退回文件时不再“悄悄”。"""
@@ -124,22 +170,54 @@ def _mysql_connect():
                            init_command="SET time_zone='+08:00'", cursorclass=pymysql.cursors.DictCursor, connect_timeout=3)
 
 
-def _sql(query: str, args=()) -> list[dict] | None:
-    """执行只读查询；连不上或出错返回 None（并记录 fallback），调用方据此退回文件模式；严格模式下抛 503。"""
+def _mysql_connection_for_query():
+    """同一 HTTP 请求复用一个连接；非请求上下文独立管理。"""
+    if has_request_context():
+        conn = getattr(g, "_mysql_conn", None)
+        if conn is None:
+            conn = _mysql_connect()
+            g._mysql_conn = conn
+        return conn, False
+    return _mysql_connect(), True
+
+
+def _close_mysql_connection(conn):
     try:
-        conn = _mysql_connect()
+        conn.close()
     except Exception as e:
-        _mysql_failed(e)
-        return None
+        app.logger.warning("关闭 MySQL 连接失败：%s", type(e).__name__)
+
+
+@app.teardown_request
+def _close_request_mysql_connection(_error=None):
+    conn = getattr(g, "_mysql_conn", None)
+    if conn is not None:
+        g._mysql_conn = None
+        _close_mysql_connection(conn)
+
+
+def _sql(query: str, args=()) -> list[dict] | None:
+    """执行只读查询；请求内复用连接，出错时关闭坏连接并按原策略回退或返回 503。"""
+    conn = None
+    owned = False
     try:
+        conn, owned = _mysql_connection_for_query()
         with conn.cursor() as cur:
             cur.execute(query, args)
             return list(cur.fetchall())
     except Exception as e:
+        if conn is not None and not owned:
+            _close_mysql_connection(conn)
+            try:
+                if getattr(g, "_mysql_conn", None) is conn:
+                    g._mysql_conn = None
+            except RuntimeError:
+                pass
         _mysql_failed(e)
         return None
     finally:
-        conn.close()
+        if conn is not None and owned:
+            _close_mysql_connection(conn)
 
 
 def _num(v, nd=None):
@@ -668,18 +746,26 @@ def _ticket_out(r: dict) -> dict:
             "created_at": fmt(r.get("created_at")), "updated_at": fmt(r.get("updated_at"))}
 
 
-def _ticket_db_call(fn):
-    """在 ads_ticket 上执行 fn(cur)；未启用或出错返回 (False, None)，调用方退回内存。"""
+def _ticket_db_call(fn, *, write=False):
+    """在 ads_ticket 上执行 fn(cur)；写失败返回 503，不回退内存。"""
+    if not _db_on("ALERT_DB"):
+        return False, None
     con = _alert_db()
     if not con:
+        if write:
+            raise MySQLWriteUnavailable()
         return False, None
     try:
         with con, con.cursor() as cur:
             r = fn(cur)
             con.commit()
             return True, r
+    except MySQLUnavailable:
+        raise
     except Exception as e:
         _mysql_failed(e)
+        if write:
+            raise MySQLWriteUnavailable() from e
         return False, None
 
 
@@ -691,14 +777,19 @@ def tickets_list():
     return ok(tickets_store())
 
 
+def demo_auth_enabled() -> bool:
+    return os.getenv("AUTH_DEMO_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _require_admin():
-    """角色只认请求头 Authorization: Bearer <token>（token 由 /api/auth/login 下发，形如 demo-admin），不信任请求体里的 role。
-    返回 None 表示放行，否则返回错误响应。"""
+    """演示令牌仅在 AUTH_DEMO_ENABLED=1 时生效，不可用于生产认证。"""
     h = request.headers.get("Authorization", "")
     token = h[7:].strip() if h.lower().startswith("bearer ") else ""
     role = {"demo-admin": "admin", "demo-readonly": "readonly"}.get(token)
     if role is None:
         return err("未登录或登录已失效，请先登录", 401)
+    if role == "admin" and not demo_auth_enabled():
+        return err("演示管理员认证未启用；请勿将演示认证用于公网部署", 503)
     if role != "admin":
         return err("访客为只读权限，无法修改，请使用管理员登录", 403)
     return None
@@ -709,9 +800,11 @@ def tickets_patch(ticket_id):
     denied = _require_admin()
     if denied:
         return denied
-    body = request.get_json(silent=True) or {}
+    body, problem = _json_body()
+    if problem:
+        return problem
     status = body.get("status")
-    if status not in {"open", "processing", "done"}:
+    if not isinstance(status, str) or status not in {"open", "processing", "done"}:
         return err("status must be open|processing|done")
     def upd(cur):
         # started_at：第一次进入 processing 时记下开始处理时间，之后不再改（见 sql/migrations/20261025_ads_ticket_started_at.sql）
@@ -723,7 +816,7 @@ def tickets_patch(ticket_id):
                 return None
         cur.execute("SELECT * FROM ads_ticket WHERE ticket_id=%s", (ticket_id,))
         return _ticket_out(cur.fetchone())
-    used, t = _ticket_db_call(upd)
+    used, t = _ticket_db_call(upd, write=True)
     if used:
         return ok(t) if t else err("ticket not found", 404)
     for t in tickets_store():
@@ -737,21 +830,29 @@ def tickets_patch(ticket_id):
 
 @app.post("/api/tickets")
 def tickets_create():
-    """从告警派工单：{station_id, type?, alert_id?}。带 alert_id 时同一条告警只派一次，并把告警改成处理中（ack）。
-    API_SOURCE=mysql（或 ALERT_DB=mysql）时写 ads_ticket，否则存进程内存。"""
+    """从告警派工单；MySQL 模式下工单与告警状态在同一事务内更新。"""
     denied = _require_admin()
     if denied:
         return denied
-    body = request.get_json(silent=True) or {}
-    sid = str(body.get("station_id") or "").strip()
-    typ = body.get("type") or "repair"
+    body, problem = _json_body()
+    if problem:
+        return problem
+    sid_raw = body.get("station_id")
+    if isinstance(sid_raw, bool) or not isinstance(sid_raw, (str, int)):
+        return err("station_id 必须是字符串或整数")
+    sid = str(sid_raw).strip()
     if not sid:
         return err("station_id 不能为空")
-    if typ not in {"repair", "inspect"}:
+    if len(sid) > 64:
+        return err("station_id 不能超过 64 个字符")
+    typ = body.get("type") or "repair"
+    if not isinstance(typ, str) or typ not in {"repair", "inspect"}:
         return err("type must be repair|inspect")
     alert_id = body.get("alert_id")
     if alert_id is not None:
-        alert_id = int(alert_id)
+        alert_id = _positive_int(alert_id)
+        if alert_id is None:
+            return err("alert_id 必须是正整数")
 
     def ins(cur):
         if alert_id is not None:
@@ -759,35 +860,55 @@ def tickets_create():
             d = cur.fetchone()
             if d:
                 return {"dup": d["ticket_id"]}
-        cur.execute("INSERT INTO ads_ticket (station_id, alert_id, type, status) VALUES (%s, %s, %s, 'open')", (sid, alert_id, typ))
+        cur.execute("INSERT INTO ads_ticket (station_id, alert_id, type, status) VALUES (%s, %s, %s, 'open')",
+                    (sid, alert_id, typ))
         cur.execute("SELECT * FROM ads_ticket WHERE ticket_id=%s", (cur.lastrowid,))
-        return _ticket_out(cur.fetchone())
-    used, t = _ticket_db_call(ins)
+        row = cur.fetchone()
+        ticket = _ticket_out(row) if row else None
+        if ticket is None:
+            raise RuntimeError("工单插入后未能读取记录")
+        alert = None
+        if alert_id is not None:
+            note = f"已派工单 WO-{ticket['ticket_id']:04d}"
+            cur.execute("UPDATE dq_alert SET status=%s, note=%s, updated_at=NOW() WHERE alert_id=%s",
+                        ("ack", note, alert_id))
+            if getattr(cur, "rowcount", 0):
+                cur.execute("SELECT * FROM dq_alert WHERE alert_id=%s", (alert_id,))
+                row = cur.fetchone()
+                alert = _norm_alert(row) if row else None
+        return {"ticket": ticket, "alert": alert}
+
+    used, result = _ticket_db_call(ins, write=True)
     if used:
-        if "dup" in t:
-            return err(f"这条告警已经派过工单 WO-{t['dup']:04d}", 409)
-        alert = alerts_write(alert_id, "ack", f"已派工单 WO-{t['ticket_id']:04d}") if alert_id is not None else None
-        return ok({"ticket": t, "alert": alert}), 201
+        if "dup" in result:
+            return err(f"这条告警已经派过工单 WO-{result['dup']:04d}", 409)
+        return ok(result), 201
     store = tickets_store()
     if alert_id is not None:
         dup = next((t for t in store if t.get("alert_id") == alert_id), None)
         if dup:
             return err(f"这条告警已经派过工单 WO-{dup['ticket_id']:04d}", 409)
-    t = {"ticket_id": max((x["ticket_id"] for x in store), default=0) + 1, "station_id": sid, "type": typ,
-         "status": "open", "alert_id": alert_id, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
-    store.append(t)
-    alert = alerts_write(alert_id, "ack", f"已派工单 WO-{t['ticket_id']:04d}") if alert_id is not None else None
-    return ok({"ticket": t, "alert": alert}), 201
+    ticket = {"ticket_id": max((x["ticket_id"] for x in store), default=0) + 1, "station_id": sid, "type": typ,
+              "status": "open", "alert_id": alert_id, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    store.append(ticket)
+    alert = alerts_write(alert_id, "ack", f"已派工单 WO-{ticket['ticket_id']:04d}") if alert_id is not None else None
+    return ok({"ticket": ticket, "alert": alert}), 201
 
 
 @app.post("/api/auth/login")
 def auth_login():
-    body = request.get_json(silent=True) or {}
+    body, problem = _json_body()
+    if problem:
+        return problem
     user = body.get("user") or "demo"
     role = body.get("role") or "readonly"
-    if role not in {"readonly", "admin"}:
+    if not isinstance(user, str) or not user.strip() or len(user) > 64:
+        return err("user 必须是 1–64 个字符")
+    if not isinstance(role, str) or role not in {"readonly", "admin"}:
         return err("role must be readonly|admin")
-    return ok({"user": user, "role": role, "token": f"demo-{role}"})
+    if role == "admin" and not demo_auth_enabled():
+        return err("演示管理员认证未启用；仅可在本地演示环境设置 AUTH_DEMO_ENABLED=1", 503)
+    return ok({"user": user.strip(), "role": role, "token": f"demo-{role}"})
 
 
 # ---- 站点明细（数据质量 / 运维工单表格页）----
@@ -1105,8 +1226,10 @@ def alerts_read() -> tuple[list[dict], str]:
 
 
 def alerts_write(alert_id: int, status: str, note: str | None):
-    con = _alert_db()
-    if con:
+    if _db_on("ALERT_DB"):
+        con = _alert_db()
+        if not con:
+            raise MySQLWriteUnavailable()
         try:
             with con, con.cursor() as cur:
                 if note is None:
@@ -1117,11 +1240,14 @@ def alerts_write(alert_id: int, status: str, note: str | None):
                 con.commit()
                 if n:
                     cur.execute("SELECT * FROM dq_alert WHERE alert_id=%s", (alert_id,))
-                    return _norm_alert(cur.fetchone())
+                    row = cur.fetchone()
+                    return _norm_alert(row) if row else None
                 return None
+        except MySQLUnavailable:
+            raise
         except Exception as e:
             _mysql_failed(e)
-            pass
+            raise MySQLWriteUnavailable() from e
     for a in alerts_store():
         if a["alert_id"] == alert_id:
             a["status"] = status
@@ -1144,13 +1270,20 @@ def alerts_patch(alert_id):
     denied = _require_admin()
     if denied:
         return denied
-    body = request.get_json(silent=True) or {}
+    body, problem = _json_body()
+    if problem:
+        return problem
     status = body.get("status")
     if status == "processing":
         status = "ack"  # 兼容旧前端
-    if status not in ALERT_STATES:
+    if not isinstance(status, str) or status not in ALERT_STATES:
         return err("status must be open|ack|closed")
-    a = alerts_write(alert_id, status, body.get("note"))
+    note = body.get("note")
+    if note is not None and not isinstance(note, str):
+        return err("note 必须是字符串")
+    if note is not None and len(note) > 500:
+        return err("note 不能超过 500 个字符")
+    a = alerts_write(alert_id, status, note)
     return ok(a) if a else err("alert not found", 404)
 
 
@@ -1239,7 +1372,7 @@ def _redis_failed(e):
 
 
 def _cache_key(path: str) -> str:
-    args = "&".join(f"{k}={v}" for k, vs in sorted(request.args.lists()) for v in vs)
+    args = urlencode([(k, v) for k, values in sorted(request.args.lists()) for v in values])
     return f"szev:{'mysql' if use_mysql() else 'file'}:{path}?{args}"
 
 
@@ -1292,4 +1425,5 @@ def _cache_store(resp):
 
 # 必须放在文件末尾：python app.py 时 app.run() 会阻塞，写在它后面的路由（地图、告警）不会注册。
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    debug = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(host="0.0.0.0", port=5000, debug=debug)
