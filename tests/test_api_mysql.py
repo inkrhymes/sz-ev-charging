@@ -172,6 +172,25 @@ def test_map_hourly_file_and_bad_date(app_mod, monkeypatch):
     assert c.get("/api/map/hourly?date=bad").status_code == 400
 
 
+def test_mysql_map_uses_request_sql_connection(app_mod, monkeypatch):
+    calls = []
+
+    def fake_sql(query, args=()):
+        calls.append(query)
+        if "FROM dim_station" in query:
+            return [{"station_id": "1", "taz_id": "11", "longitude": 114.0, "latitude": 22.5, "total_piles": 10}]
+        if "FROM ads_zone_daily" in query:
+            return [{"taz_id": "11", "avg_occupancy": Decimal("0.3"), "station_cnt": 1, "pile_cnt": 10,
+                     "center_lon": 114.0, "center_lat": 22.5}]
+        raise AssertionError(query)
+
+    monkeypatch.setattr(app_mod, "_sql", fake_sql)
+    with app_mod.app.test_request_context("/api/map/zones"):
+        zones, stations = app_mod._mysql_map()
+    assert zones[0]["taz_id"] == "11" and stations[0]["station_id"] == "1"
+    assert len(calls) == 2
+
+
 def test_realtime_zones(app_mod, monkeypatch):
     rows = [{"taz_id": "11", "window_start": dt.datetime(2022, 9, 1, 10, 0), "window_end": dt.datetime(2022, 9, 1, 10, 15),
              "occupancy": Decimal("0.4"), "busy_sum": 12, "piles_sum": 30, "station_cnt": 2, "outlier_cnt": 1, "dropped_src_cnt": 0,
