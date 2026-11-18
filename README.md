@@ -41,7 +41,7 @@ UrbanEV 原始 5 分钟 CSV（1,682 站 / 181 天）
 | 接口压测（50 用户，4 个 worker） | 常规负载 P50 12 ms → 开 Redis 后 3 ms；不限速时吞吐约 329 → 1387 QPS，P50 150 → 33 ms，错误率 0；缓存命中率约 88% | `docs/perf/api_loadtest.md` |
 | 覆盖索引 | 查询约 220 ms → 约 2 ms | `docs/perf/spark_baseline.md` |
 | Kafka 端到端回放（2022-09-01 一天） | 48.4 万条 16 秒发完（约 3 万条/秒）；流作业消费条数与发送一致，写出 325 个片区、93,727 行，平均占用率：流计算 0.273，同一天离线小时表 0.271 | `docs/streaming_design.md` 第 7 节 |
-| 测试 | CI 文件模式 145 个通过、6 个跳过（Python 3.11 / 3.12），页面检查 13 个通过 | GitHub Actions run 40172071642（main） |
+| 测试 | CI 文件模式 162 个通过、6 个跳过（Python 3.11 / 3.12），页面检查 20 个通过；另有 MySQL + Redis + API Compose 集成冒烟 | GitHub Actions run 44242115395（本优化分支） |
 
 ## 3. 运行
 
@@ -65,6 +65,28 @@ python3 scripts/smoke_live.py                          # 线上冒烟检查（8 
 - 重启后容器之间连不通时：`sudo sysctl -w net.bridge.bridge-nf-call-iptables=0`（`scripts/start.sh` 会尽量自动设置）。
 - Airflow：`docker compose -f orchestration/docker-compose.airflow.yml up -d`，详见 `docs/orchestration_design.md`。
 - 停止：`./scripts/stop.sh`（保留数据）/ `./scripts/stop.sh --purge`。
+
+### 3.1 后端代码结构与无虚拟机测试
+
+本轮后端优化把原来集中在 `api/app.py` 的 HTTP 路由拆成三个模块，同时保留原有 URL 与 endpoint 名称：
+
+```text
+api/
+├── app.py                 # Flask 启动、数据源/数据库/缓存公共能力
+└── routes/
+    ├── read.py            # 总览、片区、质量、预测等只读接口
+    ├── tickets.py         # 登录、工单接口
+    └── ops.py             # 站点、地图、告警接口
+```
+
+这样后续新增接口时，可以按资源/业务域修改对应模块，不需要继续向单个 `app.py` 堆代码。数据访问 helper 暂时保留在 `app.py`，以减少一次性重构带来的兼容风险；后续可以继续拆成 `db.py` / `cache.py` / `services/`。
+
+**本地没有虚拟机也可以先做两层验证：**
+
+1. **文件模式：** `python -m pytest -q tests`，不依赖 MySQL/Redis。
+2. **真实容器链路：** GitHub Actions 自动启动 MySQL + Redis + API，验证真实数据库写入、Redis HIT/MISS 和 API 接口。当前优化分支已经通过这套 Compose 集成测试。
+
+另外，Docker API 使用“以模块方式导入 Flask app”的启动方式，避免路由拆分后 `python app.py` 与 `import app` 产生两份模块实例。
 
 ## 4. 截图
 
