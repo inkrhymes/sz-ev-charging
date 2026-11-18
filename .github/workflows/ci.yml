@@ -25,6 +25,11 @@ jobs:
         run: python -m compileall -q -x '(^|/)(\.git|data|\.?venv[^/]*|env|node_modules|__pycache__)(/|$)' .
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q tests
+      - name: lineage diff on test failure
+        if: failure()
+        run: |
+          python lineage/build_lineage.py
+          git diff -- lineage/lineage.json
       - name: forecast smoke run
         run: python -m forecast.train --out /tmp
 
