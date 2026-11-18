@@ -303,3 +303,23 @@ def test_lineage_page_fixture(browser):
         pg.goto(f"{UI_BASE}#/overview"); pg.reload(); pg.goto(f"{UI_BASE}#/lineage"); pg.wait_for_timeout(1200)
         assert txt in pg.inner_text("#lnState")
     pg.close()
+
+def test_mobile_overview_navigation_and_metrics(browser):
+    pg, probs = open_page(browser)
+    pg.set_viewport_size({"width": 390, "height": 844})
+    pg.goto(f"{UI_BASE}#/overview")
+    pg.wait_for_load_state("networkidle")
+    assert pg.locator("#mobileRoute").is_visible()
+    assert pg.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    pg.evaluate("renderKpis({station_cnt: 0, zone_cnt: 0, avg_occupancy: null, peak_hour: null}, 0)")
+    assert "暂无" in pg.locator("#kpis .kpi-val").nth(2).inner_text()
+    pg.evaluate("renderKpis({station_cnt: 0, zone_cnt: 0, avg_occupancy: 0, peak_hour: 0}, 0)")
+    assert "0.0" in pg.locator("#kpis .kpi-val").nth(2).inner_text()
+    assert "00:00" in pg.locator("#kpis .kpi-val").nth(3).inner_text()
+    pg.locator("#ticketStat button[data-status=open]").click()
+    pw.expect(pg.locator("#view-tickets")).to_be_visible()
+    assert pg.locator("#ticketTabs .active").get_attribute("data-k") == "open"
+    pg.select_option("#mobileRoute", "quality")
+    pw.expect(pg.locator("#view-quality")).to_be_visible()
+    assert not probs["js"], probs["js"]
+    pg.close()
