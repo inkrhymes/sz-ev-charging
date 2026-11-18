@@ -2,6 +2,8 @@
 
 本项目为个人数据工程项目，基于公开数据集 [UrbanEV](https://doi.org/10.1038/s41597-025-04874-4)（深圳电动汽车充电站 5 分钟粒度运行数据，CC0）对 1,682 个站、181 天（2022-09-01 至 2023-02-28）的全量数据，构建「数据湖 → Spark/Hive 指标 → MySQL → API → 页面」的完整链路，带每日调度、数据质检告警和运维工单。
 
+快速开始使用仓库附带的演示子集。集成测试验证 2022-09-01 的总览包含 25 个站，片区列表包含 18 个片区。下文标注“全量”的指标来自 1,682 个站、181 天的研究数据。
+
 仓库地址：https://github.com/inkrhymes/sz-ev-charging
 
 ---
@@ -38,17 +40,17 @@ UrbanEV 原始 5 分钟 CSV（1,682 站 / 181 天）
 | 日前预测（提前 1 天，24 小时） | LightGBM MAE 0.0626 / RMSE 0.0945；沿用最后一个值 0.0907 / 0.1493；照抄昨天同一时刻 MAE 0.0785（2023-02-01 至 02-28，28 天） | MySQL `ads_forecast_metric_daily`，`/api/forecast/metrics` |
 | 全市平均占用率 | 0.267（全部片区、全部小时的平均） | MySQL `ads_zone_occupancy_hour` |
 | 选址建议 | 11 个片区建议加桩，共 15 根；排第一的是 TAZ 645（建议加 5 根） | MySQL `ads_zone_site_suggest`，`/api/site/suggest` |
-| 接口压测（50 用户，4 个 worker） | 常规负载 P50 12 ms → 开 Redis 后 3 ms；不限速时吞吐约 329 → 1387 QPS，P50 150 → 33 ms，错误率 0；缓存命中率约 88% | `docs/perf/api_loadtest.md` |
+| 接口压测（MySQL，50 个模拟用户） | 实验使用 4 个 Gunicorn worker（Docker 默认 1 个）。常规负载下，启用 Redis 后 P50 从 12 ms 降至 3 ms。用户连续请求、不限速的 30 秒内，启用 Redis 后吞吐从约 329 升至 1,387 QPS，P50 从 150 ms 降至 33 ms，错误率为 0，缓存命中率约 88%。 | [压测配置与结果](docs/perf/api_loadtest.md) |
 | 覆盖索引 | 查询约 220 ms → 约 2 ms | `docs/perf/spark_baseline.md` |
 | Kafka 端到端回放（2022-09-01 一天） | 48.4 万条 16 秒发完（约 3 万条/秒）；流作业消费条数与发送一致，写出 325 个片区、93,727 行，平均占用率：流计算 0.273，同一天离线小时表 0.271 | `docs/streaming_design.md` 第 7 节 |
-| 测试 | CI 文件模式 162 个通过、6 个跳过（Python 3.11 / 3.12），页面检查 20 个通过；另有 MySQL + Redis + API Compose 集成冒烟 | GitHub Actions run 44242115395（本优化分支） |
+| 自动化测试 | Python 3.11 和 3.12 文件模式测试、Playwright 页面检查，以及 Docker Compose 下的 MySQL、Redis 和 API 集成测试 | [查看主分支 CI 记录](https://github.com/inkrhymes/sz-ev-charging/actions/workflows/ci.yml?query=branch%3Amain) |
 
 ## 3. 快速开始
 
 准备 Git、Bash、Python 3.11 或 3.12（含 venv）、Docker 和 Docker Compose v2。以下命令在 Bash 中执行，Windows 可使用 Git Bash。
 
 ```bash
-git clone --branch codex/backend-hardening-2026-11-18 https://github.com/inkrhymes/sz-ev-charging.git
+git clone https://github.com/inkrhymes/sz-ev-charging.git
 cd sz-ev-charging
 cp .env.example .env
 # 首次使用仓库提供的本地演示配置。调整端口或凭据后重新加载自己的 .env。
