@@ -11,7 +11,7 @@ import os
 
 from flask import g, jsonify, request
 import app as appmod
-from app import alerts_store, alerts_write, demo_auth_enabled, tickets_store
+from app import alerts_store, alerts_write, audit_write, demo_auth_enabled, tickets_store
 from utils.http import err, ok
 
 def tickets_list():
@@ -43,13 +43,19 @@ def tickets_patch(ticket_id):
         cur.execute("SELECT * FROM ads_ticket WHERE ticket_id=%s", (ticket_id,))
         return appmod._ticket_out(cur.fetchone())
     used, t = appmod._ticket_db_call(upd, write=True)
+    st_cn = {"open": "待处理", "processing": "处理中", "done": "已完成"}.get(status, status)
     if used:
+        if t:
+            audit_write("ticket_update", f"工单 WO-{int(ticket_id):04d}（站点 {t.get('station_id', '')}）状态调整为「{st_cn}」",
+                        target_type="ticket", target_id=f"WO-{int(ticket_id):04d}")
         return ok(t) if t else err("ticket not found", 404)
     for t in tickets_store():
         if t["ticket_id"] == ticket_id:
             t["status"] = status
             if status == "processing" and not t.get("started_at"):
                 t["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            audit_write("ticket_update", f"工单 WO-{int(ticket_id):04d}（站点 {t.get('station_id', '')}）状态调整为「{st_cn}」",
+                        target_type="ticket", target_id=f"WO-{int(ticket_id):04d}")
             return ok(t)
     return err("ticket not found", 404)
 
@@ -109,11 +115,16 @@ def tickets_create():
         return {"ticket": ticket, "alert": alert}
 
     used, result = appmod._ticket_db_call(ins, write=True)
+    typ_cn = "维修" if typ == "repair" else "巡检"
     if used:
         if "alert_missing" in result:
             return err("alert not found", 404)
         if "dup" in result:
             return err(f"这条告警已经派过工单 WO-{result['dup']:04d}", 409)
+        tid = result["ticket"]["ticket_id"]
+        src_txt = f"由告警 AL-{alert_id:04d} " if alert_id is not None else ""
+        audit_write("ticket_create", f"{src_txt}派发{typ_cn}工单 WO-{tid:04d}（站点 {sid}）",
+                    target_type="ticket", target_id=f"WO-{tid:04d}")
         return ok(result), 201
     store = tickets_store()
     if alert_id is not None:
@@ -127,8 +138,10 @@ def tickets_create():
               "status": "open", "alert_id": alert_id, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")}
     store.append(ticket)
     alert = alerts_write(alert_id, "ack", f"已派工单 WO-{ticket['ticket_id']:04d}") if alert_id is not None else None
+    src_txt = f"由告警 AL-{alert_id:04d} " if alert_id is not None else ""
+    audit_write("ticket_create", f"{src_txt}派发{typ_cn}工单 WO-{ticket['ticket_id']:04d}（站点 {sid}）",
+                target_type="ticket", target_id=f"WO-{ticket['ticket_id']:04d}")
     return ok({"ticket": ticket, "alert": alert}), 201
-
 
 
 def auth_login():
@@ -141,11 +154,22 @@ def auth_login():
         return err("user 必须是 1–64 个字符")
     if not isinstance(role, str) or role not in {"readonly", "admin"}:
         return err("role must be readonly|admin")
+    uname = user.strip()
     if role == "admin" and not demo_auth_enabled():
+        audit_write("login", f"账号 {uname} 尝试管理员登录被拒绝（未开启 AUTH_DEMO_ENABLED=1）",
+                    actor=uname, role="admin", target_type="auth", target_id=uname, result="denied")
         return err("演示管理员认证未启用；仅可在本地演示环境设置 AUTH_DEMO_ENABLED=1", 503)
-    return ok({"user": user.strip(), "role": role, "token": f"demo-{role}"})
+    role_cn = "管理员" if role == "admin" else "访客"
+    audit_write("login", f"{role_cn} {uname} 登录系统", actor=uname, role=role, target_type="auth", target_id=uname)
+    return ok({"user": uname, "role": role, "token": f"demo-{role}"})
 
 
+def auth_logout():
+    body = request.get_json(silent=True) or {}
+    uname = str(body.get("user") or "").strip()[:64] or None
+    role = body.get("role") if body.get("role") in {"admin", "readonly"} else None
+    entry = audit_write("logout", f"账号退出登录", actor=uname, role=role, target_type="auth", target_id=uname)
+    return ok({"logged_out": True, "log_id": entry["log_id"]})
 
 
 def register(app):
@@ -153,3 +177,4 @@ def register(app):
     app.add_url_rule("/api/tickets/<int:ticket_id>", endpoint="tickets_patch", view_func=tickets_patch, methods=["PATCH"])
     app.add_url_rule("/api/tickets", endpoint="tickets_create", view_func=tickets_create, methods=["POST"])
     app.add_url_rule("/api/auth/login", endpoint="auth_login", view_func=auth_login, methods=["POST"])
+    app.add_url_rule("/api/auth/logout", endpoint="auth_logout", view_func=auth_logout, methods=["POST"])

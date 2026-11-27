@@ -61,6 +61,12 @@ jobs:
           test "$(J '/api/overview?dt=2022-09-01' 'd["data"]["station_cnt"]')" = 25
           test "$(J /api/zones 'len(d["data"])')" = 18
           test "$(J '/api/zone/series?taz_id=1106' 'len(d["data"]["points"])')" = 168
+          test "$(J '/api/site/suggest?top=20' 'len(d["data"]["items"]) > 0')" = True
+          test "$(J '/api/realtime/zones' 'len(d["data"]["zones"]) > 0')" = True
+          test "$(J '/api/ops/runs' 'len(d["data"]["runs"]) > 0')" = True
+          test "$(J '/api/ops/audit' 'len(d["data"]["items"]) > 0')" = True
+          test "$(J '/api/ops/peak_advisory' 'd["data"]["summary"]["zone_cnt"] > 0')" = True
+          test "$(J '/api/forecast/metrics' 'len(d["data"]["points"]) > 0')" = True
           curl -fs $B/ | grep -q '<title>'
           # 写链路：演示管理员仅在 CI 私有环境启用；创建后再修改工单状态。
           TICKET_JSON=$(curl -fsS -X POST "$B/api/tickets" -H 'Content-Type: application/json' -H 'Authorization: Bearer demo-admin' -d '{"station_id":"1554","type":"repair"}')

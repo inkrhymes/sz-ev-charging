@@ -436,10 +436,16 @@ def _require_admin():
     token = h[7:].strip() if h.lower().startswith("bearer ") else ""
     role = {"demo-admin": "admin", "demo-readonly": "readonly"}.get(token)
     if role is None:
+        audit_write("auth_denied", f"未登录访问受保护写接口：{request.method} {request.path}",
+                    actor=_audit_header_user("访客"), role="readonly", target_type="auth", target_id=request.path, result="denied")
         return err("未登录或登录已失效，请先登录", 401)
     if role == "admin" and not demo_auth_enabled():
+        audit_write("auth_denied", f"演示管理员未启用，拒绝执行：{request.method} {request.path}",
+                    actor=_audit_header_user("管理员"), role="admin", target_type="auth", target_id=request.path, result="denied")
         return err("演示管理员认证未启用；请勿将演示认证用于公网部署", 503)
     if role != "admin":
+        audit_write("auth_denied", f"只读访客尝试执行写操作：{request.method} {request.path}",
+                    actor=_audit_header_user("访客"), role="readonly", target_type="auth", target_id=request.path, result="denied")
         return err("访客为只读权限，无法修改，请使用管理员登录", 403)
     return None
 
@@ -709,6 +715,213 @@ def alerts_write(alert_id: int, status: str, note: str | None):
     return None
 
 
+# ---- 系统操作审计日志（模块 6：MySQL sys_op_log + 文件模式内存日志）----
+AUDIT_ACTIONS = {"login", "logout", "alert_update", "ticket_create", "ticket_update", "export", "auth_denied"}
+AUDIT_RESULTS = {"ok", "denied", "failed"}
+_AUDIT_LOGS: list[dict] | None = None
+_AUDIT_MAX_MEM = 1000
+
+
+def _audit_header_user(default: str = "访客") -> str:
+    if not has_request_context():
+        return default
+    raw = (request.headers.get("X-Demo-User") or "").strip()
+    if raw:
+        from urllib.parse import unquote
+        name = unquote(raw).strip()
+        if name:
+            return name[:64]
+    return default
+
+
+def _audit_actor_role(actor: str | None = None, role: str | None = None) -> tuple[str, str]:
+    inferred_role = role
+    if inferred_role is None and has_request_context():
+        h = request.headers.get("Authorization", "")
+        token = h[7:].strip() if h.lower().startswith("bearer ") else ""
+        inferred_role = {"demo-admin": "admin", "demo-readonly": "readonly"}.get(token, "readonly")
+    final_role = inferred_role if inferred_role in {"admin", "readonly"} else "readonly"
+    default_actor = "管理员" if final_role == "admin" else "访客"
+    final_actor = (actor or _audit_header_user(default_actor)).strip()[:64] or default_actor
+    return final_actor, final_role
+
+
+def _audit_ip() -> str:
+    if not has_request_context():
+        return "127.0.0.1"
+    fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return (fwd or request.remote_addr or "127.0.0.1")[:64]
+
+
+def _norm_audit(r: dict) -> dict:
+    return {
+        "log_id": int(r["log_id"]),
+        "actor": str(r.get("actor") or "访客"),
+        "role": str(r.get("role") or "readonly"),
+        "action": str(r.get("action") or "login"),
+        "target_type": r.get("target_type"),
+        "target_id": None if r.get("target_id") is None else str(r.get("target_id")),
+        "detail": str(r.get("detail") or ""),
+        "result": str(r.get("result") or "ok"),
+        "ip": str(r.get("ip") or "127.0.0.1"),
+        "created_at": _ts(r.get("created_at"))[:19],
+    }
+
+
+def audit_store() -> list[dict]:
+    """文件模式内存审计日志：预置 4 条演示初始化记录，实时操作会继续追加。"""
+    global _AUDIT_LOGS
+    if _AUDIT_LOGS is None:
+        _AUDIT_LOGS = [
+            {
+                "log_id": 4, "actor": "访客", "role": "readonly", "action": "auth_denied",
+                "target_type": "ticket", "target_id": "WO-0001",
+                "detail": "只读访客尝试修改工单状态，已被权限拦截", "result": "denied",
+                "ip": "127.0.0.1", "created_at": "2022-09-14 09:20:00",
+            },
+            {
+                "log_id": 3, "actor": "demo_admin", "role": "admin", "action": "ticket_update",
+                "target_type": "ticket", "target_id": "WO-0001",
+                "detail": "工单 WO-0001（站点 1334）状态调整为「处理中」", "result": "ok",
+                "ip": "127.0.0.1", "created_at": "2022-09-14 09:12:00",
+            },
+            {
+                "log_id": 2, "actor": "demo_admin", "role": "admin", "action": "ticket_create",
+                "target_type": "ticket", "target_id": "WO-0001",
+                "detail": "由告警 AL-0001 派发维修工单 WO-0001（站点 1334）", "result": "ok",
+                "ip": "127.0.0.1", "created_at": "2022-09-14 09:05:00",
+            },
+            {
+                "log_id": 1, "actor": "demo_admin", "role": "admin", "action": "login",
+                "target_type": "auth", "target_id": "demo_admin",
+                "detail": "管理员 demo_admin 登录系统", "result": "ok",
+                "ip": "127.0.0.1", "created_at": "2022-09-14 09:00:00",
+            },
+        ]
+    return _AUDIT_LOGS
+
+
+def audit_write(
+    action: str,
+    detail: str,
+    *,
+    actor: str | None = None,
+    role: str | None = None,
+    target_type: str | None = None,
+    target_id: str | int | None = None,
+    result: str = "ok",
+) -> dict:
+    """记录关键系统操作审计日志：MySQL 模式写 sys_op_log（失败不阻塞主业务），文件模式写内存。"""
+    act = action if action in AUDIT_ACTIONS else "login"
+    res = result if result in AUDIT_RESULTS else "ok"
+    who, who_role = _audit_actor_role(actor, role)
+    tid = None if target_id is None else str(target_id)[:64]
+    ttype = None if target_type is None else str(target_type)[:32]
+    msg = str(detail or "")[:500]
+    ip = _audit_ip()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if use_mysql() and not (has_request_context() and getattr(g, "mysql_error", None)):
+        conn = None
+        try:
+            conn = _mysql_connect()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO sys_op_log (actor, role, action, target_type, target_id, detail, result, ip) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (who, who_role, act, ttype, tid, msg, res, ip),
+                )
+                new_id = cur.lastrowid
+            conn.commit()
+            return {
+                "log_id": int(new_id or 0), "actor": who, "role": who_role, "action": act,
+                "target_type": ttype, "target_id": tid, "detail": msg, "result": res,
+                "ip": ip, "created_at": now_str,
+            }
+        except Exception as e:
+            app.logger.warning("写入审计日志 sys_op_log 失败（不阻塞主流程）：%s", type(e).__name__)
+        finally:
+            if conn is not None:
+                _close_mysql_connection(conn)
+
+    store = audit_store()
+    next_id = max((int(x["log_id"]) for x in store), default=0) + 1
+    entry = {
+        "log_id": next_id, "actor": who, "role": who_role, "action": act,
+        "target_type": ttype, "target_id": tid, "detail": msg, "result": res,
+        "ip": ip, "created_at": now_str,
+    }
+    store.insert(0, entry)
+    if len(store) > _AUDIT_MAX_MEM:
+        del store[_AUDIT_MAX_MEM:]
+    return entry
+
+
+def audit_read(
+    *,
+    action: str | None = None,
+    result: str | None = None,
+    role: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    """读取并筛选操作审计日志：MySQL 模式读 sys_op_log，文件模式读内存审计记录。"""
+    src = "file"
+    rows: list[dict] | None = None
+    if use_mysql():
+        db_rows = _sql(
+            "SELECT log_id, actor, role, action, target_type, target_id, detail, result, ip, created_at "
+            "FROM sys_op_log ORDER BY created_at DESC, log_id DESC LIMIT 500"
+        )
+        if db_rows is not None:
+            src = "mysql"
+            rows = [_norm_audit(r) for r in db_rows]
+    if rows is None:
+        rows = list(audit_store())
+
+    by_action: dict[str, int] = defaultdict(int)
+    ok_cnt = 0
+    denied_cnt = 0
+    for r in rows:
+        by_action[r["action"]] += 1
+        if r["result"] == "ok":
+            ok_cnt += 1
+        elif r["result"] == "denied":
+            denied_cnt += 1
+
+    kw = (q or "").strip().lower()
+    filtered = [
+        r for r in rows
+        if (not action or r["action"] == action)
+        and (not result or r["result"] == result)
+        and (not role or r["role"] == role)
+        and (
+            not kw
+            or kw in r["actor"].lower()
+            or kw in (r["target_id"] or "").lower()
+            or kw in r["detail"].lower()
+        )
+    ]
+    total = len(filtered)
+    start = (page - 1) * page_size
+    items = filtered[start:start + page_size]
+    return {
+        "source": src,
+        "demo_auth_enabled": demo_auth_enabled(),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "counts": {
+            "total": len(rows),
+            "ok": ok_cnt,
+            "denied": denied_cnt,
+            "by_action": dict(by_action),
+        },
+        "items": items,
+    }
+
+
 # 调度运行 / 监控接口（只读）：见 api/ops.py
 import ops as _ops  # noqa: E402
 _ops.register(app, lambda q, a=(): _sql(q, a), ok, err)  # lambda：测试可 monkeypatch app._sql
@@ -720,6 +933,11 @@ _lineage.register(app, ok, err)
 # ---- API route modules ----
 # Keep the original endpoint names/URL rules while moving HTTP handlers
 # out of the application bootstrap module.
+# 直接 python api/app.py 启动时把 __main__ 注册为 app 模块，避免 routes/read.py 反向 import app 触发循环导入。
+if __name__ == "__main__":
+    import sys as _sys
+    _sys.modules.setdefault("app", _sys.modules[__name__])
+
 from routes.read import register as _register_read_routes
 from routes.tickets import register as _register_ticket_routes
 from routes.ops import register as _register_ops_routes
@@ -737,7 +955,8 @@ CACHE_TTL = {  # 秒；可用 CACHE_TTL_DEFAULT 整体覆盖历史类接口
     "/api/tickets": 10,
 }
 CACHE_HISTORY = {"/api/overview", "/api/zones", "/api/zone/series", "/api/quality", "/api/map/zones", "/api/map/hourly",
-                 "/api/site/suggest", "/api/forecast/metrics", "/api/baseline", "/api/data_range", "/api/stations"}
+                 "/api/site/suggest", "/api/forecast/metrics", "/api/baseline", "/api/data_range", "/api/stations",
+                 "/api/ops/peak_advisory"}
 CACHE_INVALIDATE = {"/api/alerts": ("/api/alerts", "/api/tickets", "/api/overview"), "/api/tickets": ("/api/tickets", "/api/alerts")}
 # 发布新后端版本时可递增，避免旧版本缓存结构被新代码误读。
 CACHE_VERSION = os.getenv("CACHE_VERSION", "v2")

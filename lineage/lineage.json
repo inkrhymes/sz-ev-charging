@@ -17,6 +17,20 @@
    "label": "/api/alerts/<int:alert_id>"
   },
   {
+   "id": "api:/api/auth/login",
+   "kind": "api",
+   "name": "/api/auth/login",
+   "layer": "api",
+   "label": "/api/auth/login"
+  },
+  {
+   "id": "api:/api/auth/logout",
+   "kind": "api",
+   "name": "/api/auth/logout",
+   "layer": "api",
+   "label": "/api/auth/logout"
+  },
+  {
    "id": "api:/api/baseline",
    "kind": "api",
    "name": "/api/baseline",
@@ -59,11 +73,32 @@
    "label": "/api/map/zones"
   },
   {
+   "id": "api:/api/ops/audit",
+   "kind": "api",
+   "name": "/api/ops/audit",
+   "layer": "api",
+   "label": "/api/ops/audit"
+  },
+  {
+   "id": "api:/api/ops/audit/export",
+   "kind": "api",
+   "name": "/api/ops/audit/export",
+   "layer": "api",
+   "label": "/api/ops/audit/export"
+  },
+  {
    "id": "api:/api/ops/health_metrics",
    "kind": "api",
    "name": "/api/ops/health_metrics",
    "layer": "api",
    "label": "/api/ops/health_metrics"
+  },
+  {
+   "id": "api:/api/ops/peak_advisory",
+   "kind": "api",
+   "name": "/api/ops/peak_advisory",
+   "layer": "api",
+   "label": "/api/ops/peak_advisory"
   },
   {
    "id": "api:/api/ops/runs",
@@ -458,6 +493,13 @@
    "label": "rt_zone_occupancy"
   },
   {
+   "id": "mysql:sys_op_log",
+   "kind": "mysql",
+   "name": "sys_op_log",
+   "layer": "mysql",
+   "label": "sys_op_log"
+  },
+  {
    "id": "raw:pile_information",
    "kind": "raw",
    "name": "pile_information",
@@ -505,6 +547,13 @@
    "name": "kafka_charge_5min",
    "layer": "stream",
    "label": "Kafka topic charge_5min"
+  },
+  {
+   "id": "stream:user_audit_events",
+   "kind": "stream",
+   "name": "user_audit_events",
+   "layer": "stream",
+   "label": "用户操作审计事件"
   }
  ],
  "edges": [
@@ -517,6 +566,30 @@
    "auto": true
   },
   {
+   "source": "api:/api/alerts/<int:alert_id>",
+   "target": "mysql:sys_op_log",
+   "kind": "write",
+   "script": "PATCH /api/alerts/<int:alert_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "api:/api/auth/login",
+   "target": "mysql:sys_op_log",
+   "kind": "write",
+   "script": "POST /api/auth/login",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "api:/api/auth/logout",
+   "target": "mysql:sys_op_log",
+   "kind": "write",
+   "script": "POST /api/auth/logout",
+   "tasks": [],
+   "auto": true
+  },
+  {
    "source": "api:/api/tickets",
    "target": "mysql:ads_ticket",
    "kind": "write",
@@ -533,8 +606,24 @@
    "auto": true
   },
   {
+   "source": "api:/api/tickets",
+   "target": "mysql:sys_op_log",
+   "kind": "write",
+   "script": "POST /api/tickets",
+   "tasks": [],
+   "auto": true
+  },
+  {
    "source": "api:/api/tickets/<int:ticket_id>",
    "target": "mysql:ads_ticket",
+   "kind": "write",
+   "script": "PATCH /api/tickets/<int:ticket_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "api:/api/tickets/<int:ticket_id>",
+   "target": "mysql:sys_op_log",
    "kind": "write",
    "script": "PATCH /api/tickets/<int:ticket_id>",
    "tasks": [],
@@ -1372,6 +1461,14 @@
   },
   {
    "source": "mysql:ads_zone_occupancy_hour",
+   "target": "api:/api/ops/peak_advisory",
+   "kind": "read",
+   "script": "GET /api/ops/peak_advisory",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:ads_zone_occupancy_hour",
    "target": "api:/api/zone/series",
    "kind": "read",
    "script": "GET /api/zone/series",
@@ -1399,6 +1496,14 @@
    "target": "api:/api/map/zones",
    "kind": "read",
    "script": "GET /api/map/zones",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:dim_station",
+   "target": "api:/api/ops/peak_advisory",
+   "kind": "read",
+   "script": "GET /api/ops/peak_advisory",
    "tasks": [],
    "auto": true
   },
@@ -1511,6 +1616,62 @@
    "auto": true
   },
   {
+   "source": "mysql:sys_op_log",
+   "target": "api:/api/alerts/<int:alert_id>",
+   "kind": "read",
+   "script": "PATCH /api/alerts/<int:alert_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:sys_op_log",
+   "target": "api:/api/auth/login",
+   "kind": "read",
+   "script": "POST /api/auth/login",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:sys_op_log",
+   "target": "api:/api/auth/logout",
+   "kind": "read",
+   "script": "POST /api/auth/logout",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:sys_op_log",
+   "target": "api:/api/ops/audit",
+   "kind": "read",
+   "script": "GET /api/ops/audit",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:sys_op_log",
+   "target": "api:/api/ops/audit/export",
+   "kind": "read",
+   "script": "GET /api/ops/audit/export",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:sys_op_log",
+   "target": "api:/api/tickets",
+   "kind": "read",
+   "script": "POST /api/tickets",
+   "tasks": [],
+   "auto": true
+  },
+  {
+   "source": "mysql:sys_op_log",
+   "target": "api:/api/tickets/<int:ticket_id>",
+   "kind": "read",
+   "script": "PATCH /api/tickets/<int:ticket_id>",
+   "tasks": [],
+   "auto": true
+  },
+  {
    "source": "raw:pile_information",
    "target": "lake:ods/pile_power",
    "kind": "write",
@@ -1580,6 +1741,14 @@
    "tasks": [
     "streaming"
    ],
+   "auto": false
+  },
+  {
+   "source": "stream:user_audit_events",
+   "target": "mysql:sys_op_log",
+   "kind": "write",
+   "script": "api/app.py",
+   "tasks": [],
    "auto": false
   }
  ],

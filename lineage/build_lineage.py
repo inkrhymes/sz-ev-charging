@@ -238,7 +238,7 @@ def build() -> dict:
     ov = yaml.safe_load(OVERRIDES.read_text(encoding="utf-8"))
     my = mysql_tables()
     files = [p for d in SCAN_DIRS for p in sorted((ROOT / d).glob("*.py"))
-             if p.name != "__init__.py" and str(p.relative_to(ROOT)) not in ov.get("skip_scan", [])]
+             if p.name != "__init__.py" and p.relative_to(ROOT).as_posix() not in ov.get("skip_scan", [])]
     hive = hive_tables(files)
     tasks = ov.get("tasks", {})
     edges = {}
@@ -251,7 +251,7 @@ def build() -> dict:
 
     unmapped = []
     for p in files:
-        rel = str(p.relative_to(ROOT))
+        rel = p.relative_to(ROOT).as_posix()
         if rel in ov.get("manual_only", []):
             continue
         pairs, writes = scan_script(p, my, hive)
