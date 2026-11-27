@@ -23,8 +23,8 @@ echo "[1/5] 启动 MySQL"
 docker compose up -d mysql
 until [ "$(docker inspect -f '{{.State.Health.Status}}' sz-ev-mysql)" = healthy ]; do sleep 2; done
 
-echo "[2/5] 建表与指标视图（ods -> dwd -> ads）"
-for f in sql/ods/*.sql sql/dwd/*.sql sql/ads/*.sql quality/sql/dq_alert.sql quality/sql/dq_run_log.sql; do
+echo "[2/5] 建表与指标视图（ods -> dwd -> ads -> ops）"
+for f in sql/ods/*.sql sql/dwd/*.sql sql/ads/*.sql sql/ops/*.sql quality/sql/dq_alert.sql quality/sql/dq_run_log.sql; do
   case "$f" in *14_seed_tickets.sql) continue;; esac   # 演示工单随 demo 装载一起处理
   echo "  $f"
   docker exec -i sz-ev-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --default-character-set=utf8mb4 "$MYSQL_DATABASE" < "$f"

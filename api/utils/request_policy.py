@@ -59,7 +59,7 @@ def configure_http(app):
         allowed = _cors_allowed_origins()
         if origin and (origin in allowed or "*" in allowed):
             resp.headers["Access-Control-Allow-Origin"] = "*" if "*" in allowed else origin
-            resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Demo-User"
             resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,PUT,DELETE,OPTIONS"
             resp.headers["Access-Control-Max-Age"] = "600"
             if "*" not in allowed:

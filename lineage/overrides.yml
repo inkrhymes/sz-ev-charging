@@ -25,7 +25,7 @@ tasks:
 
 # 不扫描的脚本（只做演示 CSV、没有真实读写，或写的是临时表）
 skip_scan: [etl/load_ods.py, etl/clean_to_dwd.py, etl/generate_demo_subset.py, forecast/train.py, forecast/db.py,
-            etl/load_mysql_from_demo.py]   # 演示数据装载，只在空库第一次启动时跑
+            etl/load_mysql_from_demo.py, etl/realtime_replay_mysql.py]   # 演示数据装载与轻量回放，不纳入正式数仓血缘
 
 # 只用手工边、不用自动推断的脚本（自动推断会把对应关系连错）
 manual_only: [spark/jobs/export_ads_parquet.py]
@@ -37,6 +37,7 @@ labels:
   raw:weather_csv: 机场/市区气象站逐小时 CSV
   raw:taz_shapefile_poi: 深圳交通小区边界 + POI
   stream:kafka_charge_5min: Kafka topic charge_5min
+  stream:user_audit_events: 用户操作审计事件
   api:lineage: 本接口
 
 # 自动推断连错、要去掉的边：[上游, 下游, 脚本]
@@ -80,6 +81,7 @@ edges:
   - [lake:ads/forecast_metric_daily, mysql:dq_alert, forecast/evaluate.py]
   - [stream:kafka_charge_5min, mysql:rt_zone_occupancy, stream/zone_occupancy_stream.py]
   - [stream:airflow_task_events, mysql:ops_task_run, orchestration/run_log.py]
+  - [stream:user_audit_events, mysql:sys_op_log, api/app.py]
   - [mysql:dq_run_log, mysql:ops_task_run, orchestration/backfill_run_log.py]
   - [raw:weather_csv, lake:ods/weather, etl/weather_price.py]
   - [lake:ods/weather, lake:dwd/weather_hourly, etl/weather_price.py]
