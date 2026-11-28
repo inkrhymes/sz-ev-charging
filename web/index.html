@@ -56,108 +56,119 @@
       font-feature-settings:"tnum" 1;
     }
 
-    /* top bar — 实色底、利落工程结构，去毛玻璃与营销徽标 */
+    /* top bar — 绿牌号牌 + 纯文字竖线值班条（去胶囊边框） */
     .topbar {
       position:fixed; top:0; left:0; right:0; height:56px;
       background:var(--surface);
       border-bottom:1px solid var(--line);
-      display:flex; align-items:center; justify-content:space-between; padding:0 20px; z-index:30;
+      display:flex; align-items:center; justify-content:space-between; padding:0 24px; z-index:30;
     }
-    .brand { display:flex; align-items:center; gap:10px; font-size:15px; font-weight:650; letter-spacing:-.015em; color:var(--ink-1); min-width:0; white-space:nowrap; overflow:hidden; }
+    .brand { display:flex; align-items:center; gap:10px; font-size:15px; font-weight:600; letter-spacing:-.01em; color:var(--ink-1); min-width:0; white-space:nowrap; overflow:hidden; }
     .brand-name { overflow:hidden; text-overflow:ellipsis; }
-    .brand .mark {
-      width:28px; height:28px; border-radius:6px;
-      background:var(--plate);
-      color:#FFFFFF; display:flex; align-items:center; justify-content:center;
-      flex:none;
+    .plate-mark {
+      display:inline-flex; align-items:stretch; width:30px; height:20px;
+      border:1px solid var(--plate); border-radius:3px; overflow:hidden; flex:none;
+      background:var(--surface); user-select:none;
     }
-    .brand .mark svg { width:16px; height:16px; stroke-width:2; }
-    .brand-badge { display:none; }
-    .top-right { display:flex; align-items:center; gap:10px; color:var(--ink-3); font-size:12px; white-space:nowrap; }
-    .top-pill {
-      display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:5px 11px; line-height:18px;
-      background:var(--surface-sub); border:1px solid var(--line); border-radius:var(--radius-ctrl);
-      color:var(--ink-2); font-size:12px; font-weight:500;
+    .plate-mark .pm-prov {
+      width:40%; background:var(--plate); color:#FFFFFF;
+      display:flex; align-items:center; justify-content:center;
+      font-family:var(--font-body); font-size:9.5px; font-weight:600; line-height:1;
     }
-    .top-pill svg { width:13px; height:13px; color:var(--ink-3); }
-    .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--ink-4); flex:none; }
+    .plate-mark .pm-code {
+      width:60%; background:var(--surface); color:var(--plate);
+      display:flex; align-items:center; justify-content:center;
+      font-family:var(--font-num); font-size:12px; font-weight:600; line-height:1;
+    }
+    .top-right { display:flex; align-items:center; gap:12px; color:var(--ink-3); font-size:12px; line-height:18px; white-space:nowrap; }
+    .top-meta { display:inline-flex; align-items:center; gap:6px; color:var(--ink-3); font-size:12px; line-height:18px; }
+    .top-sep { width:1px; height:14px; background:var(--line); flex:none; }
+    .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--ink-4); flex:none; }
     .dot.on { background:var(--plate); }
+    .top-act {
+      display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 6px;
+      border-radius:var(--radius-ctrl); border:0; background:transparent;
+      color:var(--ink-2); font:inherit; font-size:12px; font-weight:500; cursor:pointer;
+      transition:color .14s ease, background .14s ease;
+    }
+    .top-act:hover { color:var(--plate-strong); background:var(--plate-tint); }
+    .top-act svg { width:14px; height:14px; }
     .icon-btn {
       display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 10px;
       border-radius:var(--radius-ctrl); border:1px solid var(--line); background:var(--surface);
-      color:var(--ink-2); font-size:12px; font-weight:500; cursor:pointer;
+      color:var(--ink-2); font:inherit; font-size:12px; font-weight:500; cursor:pointer;
       transition:border-color .14s ease, color .14s ease, background .14s ease;
     }
     .icon-btn:hover { color:var(--plate-strong); border-color:var(--plate); background:var(--plate-tint); }
     .icon-btn svg { width:14px; height:14px; }
     .user {
-      position:relative; display:flex; align-items:center; gap:8px; cursor:pointer;
-      color:var(--ink-1); font-size:13px; font-weight:500;
-      padding:3px 8px 3px 4px; border-radius:var(--radius-ctrl); border:1px solid transparent; transition:background .14s ease, border-color .14s ease;
+      position:relative; display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+      color:var(--ink-1); font-size:12px; font-weight:500;
+      padding:3px 6px 3px 3px; border-radius:var(--radius-ctrl); transition:background .14s ease;
     }
-    .user:hover { background:var(--surface-sub); border-color:var(--line); }
+    .user:hover { background:var(--surface-sub); }
     .avatar {
-      width:26px; height:26px; border-radius:var(--radius-tag);
-      background:var(--plate-tint);
-      border:1px solid var(--line); color:var(--plate-strong);
-      display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:650;
+      width:24px; height:24px; border-radius:var(--radius-tag);
+      background:var(--plate-tint); color:var(--plate-strong);
+      display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600;
     }
     .menu-pop {
-      display:none; position:absolute; right:0; top:40px; width:208px;
+      display:none; position:absolute; right:0; top:38px; width:200px;
       background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card);
       box-shadow:var(--shadow-pop); padding:6px; cursor:default;
     }
     .menu-pop.open { display:block; }
     .menu-pop .info { padding:8px 10px 10px; border-bottom:1px solid var(--line-soft); margin-bottom:4px; }
-    .menu-pop .info div:first-child { font-weight:600; color:var(--ink-1); font-size:13.5px; }
+    .menu-pop .info div:first-child { font-weight:600; color:var(--ink-1); font-size:13px; }
     .menu-pop .info div:last-child { color:var(--ink-3); font-size:12px; margin-top:2px; }
-    .menu-pop .item { padding:7px 10px; border-radius:var(--radius-tag); color:var(--ink-2); font-size:13px; cursor:pointer; transition:background .14s, color .14s; }
+    .menu-pop .item {
+      display:block; width:100%; border:0; background:transparent; text-align:left; font:inherit;
+      padding:7px 10px; border-radius:var(--radius-tag); color:var(--ink-2); font-size:13px; cursor:pointer;
+      transition:background .14s ease, color .14s ease;
+    }
     .menu-pop .item:hover { background:var(--surface-sub); color:var(--plate-strong); }
 
-    /* sider — 次级微冷中性表面，去掉渐变与侧边竖条 */
+    /* sider — 白底平坦侧栏，无左竖条与阴影，折叠宽 56px */
     .sider {
       position:fixed; top:56px; left:0; bottom:0; width:var(--side-w);
-      background:var(--surface-sub); border-right:1px solid var(--line);
-      overflow:hidden auto; z-index:20; transition:width .18s ease;
+      background:var(--surface); border-right:1px solid var(--line);
+      overflow:hidden auto; z-index:20; transition:width .15s ease;
       display:flex; flex-direction:column; padding-top:8px;
     }
     .group {
-      padding:14px 16px 5px; font-size:11.5px; font-weight:600; letter-spacing:.02em;
-      color:var(--ink-4); white-space:nowrap;
+      padding:14px 16px 4px; font-size:12px; line-height:18px; font-weight:400;
+      color:var(--ink-3); white-space:nowrap;
     }
     .nav { list-style:none; margin:0; padding:0 8px; }
     .nav li {
       position:relative; height:36px; display:flex; align-items:center;
-      margin:1px 0; border-radius:var(--radius-ctrl); color:var(--ink-2); cursor:pointer; white-space:nowrap;
-      border:1px solid transparent;
-      transition:background .14s ease, color .14s ease, border-color .14s ease;
+      margin:2px 0; border-radius:var(--radius-ctrl); color:var(--ink-2); cursor:pointer; white-space:nowrap;
+      transition:background .14s ease, color .14s ease;
     }
     .nav li > a {
-      display:flex; align-items:center; gap:10px; color:inherit; font-weight:500; font-size:13.5px;
-      width:100%; height:100%; padding:0 11px; text-decoration:none;
+      display:flex; align-items:center; gap:10px; color:inherit; font-weight:400; font-size:14px; line-height:22px;
+      width:100%; height:100%; padding:0 10px; text-decoration:none; border-radius:var(--radius-ctrl);
     }
     .nav li > a:hover { text-decoration:none; }
-    .nav li svg { color:var(--ink-4); transition:color .14s ease; }
-    .nav li:hover { background:#EDF1F6; color:var(--ink-1); }
+    .nav li svg { color:var(--ink-3); transition:color .14s ease; }
+    .nav li:hover { background:var(--surface-sub); color:var(--ink-1); }
     .nav li:hover svg { color:var(--ink-2); }
     .nav li.active {
-      background:var(--surface);
+      background:var(--plate-tint);
       color:var(--plate-strong);
-      border-color:var(--line);
-      box-shadow:0 1px 2px rgba(15,23,42,.04);
     }
     .nav li.active > a { font-weight:600; }
     .nav li.active svg { color:var(--plate); }
     .collapse {
-      margin-top:auto; height:42px; border-top:1px solid var(--line);
-      display:flex; align-items:center; gap:8px; padding:0 18px;
-      color:var(--ink-3); font-size:12.5px; font-weight:500; cursor:pointer;
-      transition:color .14s, background .14s;
+      margin-top:auto; height:42px; width:100%; border:0; border-top:1px solid var(--line-soft); background:transparent;
+      display:flex; align-items:center; gap:8px; padding:0 16px; font:inherit;
+      color:var(--ink-3); font-size:12px; font-weight:400; cursor:pointer;
+      transition:color .14s ease, background .14s ease;
     }
-    .collapse:hover { color:var(--plate-strong); background:#EDF1F6; }
-    body.folded { --side-w:58px; }
+    .collapse:hover { color:var(--plate-strong); background:var(--surface-sub); }
+    body.folded { --side-w:56px; }
     body.folded .group, body.folded .nav li span, body.folded .collapse span { display:none; }
-    body.folded .nav { padding:0 7px; }
+    body.folded .nav { padding:0 8px; }
     body.folded .nav li > a { justify-content:center; padding:0; }
     body.folded .collapse { justify-content:center; padding:0; }
     body.folded .collapse svg { transform:rotate(180deg); }
@@ -517,10 +528,9 @@
       .kpis6 > .col-4 { grid-column:span 8; }
     }
     @media (max-width:1180px) {
-      .topbar { padding:0 14px; gap:10px; }
+      .topbar { padding:0 16px; gap:10px; }
       .brand { font-size:14px; gap:8px; }
       .top-right { gap:8px; }
-      .top-pill { padding:5px 10px; }
       .card-body { overflow-x:auto; }
     }
     @media (max-width:1100px) {
@@ -530,15 +540,14 @@
     }
     @media (max-width:700px) {
       .sider, .crumb, .top-right .hide-sm, #userName { display:none; }
-      .main { margin-left:0; padding:68px 12px 24px; }
+      .main { margin-left:0; padding:68px 16px 24px; }
       .topbar { padding:0 12px; gap:8px; }
       .brand { flex:1; gap:8px; }
       .brand-name { display:none; }
-      .brand-short { display:inline; white-space:nowrap; font-size:14px; line-height:20px; font-weight:650; }
-      .top-right { gap:6px; }
-      .top-pill { padding:4px 8px; min-height:28px; }
-      .icon-btn { padding:0 8px; height:28px; }
-      #mobileRoute { display:block; width:100%; margin-bottom:12px; max-width:100%; }
+      .brand-short { display:inline; white-space:nowrap; font-size:14px; line-height:20px; font-weight:600; color:var(--ink-1); }
+      .top-right { gap:8px; }
+      .top-act { padding:0 4px; height:28px; }
+      #mobileRoute { display:block; width:100%; height:36px; margin-bottom:12px; max-width:100%; }
       .grid { gap:10px; }
       .grid.kpis6, #qualityKpis, #fcCards { gap:1px; }
       .grid > [class*="col-"] { grid-column:span 24; }
@@ -560,14 +569,12 @@
 </head>
 <body>
   <svg style="display:none" xmlns="http://www.w3.org/2000/svg">
-    <!-- 品牌与通用图标 -->
-    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H12L11 22l8.5-11.5H12L13 2z"/></symbol>
+    <!-- 通用图标 -->
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
     <symbol id="i-fold" viewBox="0 0 24 24"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
-    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></symbol>
-    <!-- 11 个页面专属语义图标 -->
+    <!-- 13 个页面语义图标 -->
     <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
     <symbol id="i-zone" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/><path d="M16 9l3-3 2 2"/></symbol>
     <symbol id="i-compare" viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 9-8"/><path d="M3 12l5-2 4 1 9-1" stroke-dasharray="2.5 2.5"/></symbol>
@@ -581,29 +588,27 @@
     <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4 2.5-2.5z"/></symbol>
     <symbol id="i-audit" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></symbol>
     <symbol id="i-peak" viewBox="0 0 24 24"><path d="M3 17l4.5-4.5L11 16l4-8 3 4h3"/><path d="M3 9h18" stroke-dasharray="2.5 2.5"/></symbol>
-    <!-- KPI 语义小图标 -->
-    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M9 4v16M15 4v16"/></symbol>
-    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4 3 19h18L12 4z"/><path d="M12 10v4M12 16.5h.01"/></symbol>
-    <symbol id="i-missing" viewBox="0 0 24 24"><path d="M5 19v-5M10 19V9M15 19v-7M19 6v6M19 16h.01"/></symbol>
   </svg>
 
   <header class="topbar">
     <div class="brand">
-      <span class="mark"><svg class="ic"><use href="#i-bolt"/></svg></span>
+      <span class="plate-mark" aria-hidden="true"><span class="pm-prov">粤</span><span class="pm-code">B</span></span>
       <span class="brand-name">深圳市电动汽车充电站运行管理可视化系统</span>
       <span class="brand-short">深圳充电站</span>
-      <span class="brand-badge">城市充能监测</span>
     </div>
     <div class="top-right">
-      <span class="top-pill hide-sm"><svg class="ic"><use href="#i-cal"/></svg><span id="dataRange">数据时间：2022-09-01 至 2022-09-14</span></span>
-      <span class="top-pill" id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">当前：连接中</span></span>
-      <button type="button" class="icon-btn" id="btnTopRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg><span class="hide-sm">刷新</span></button>
-      <div class="user" id="userBox">
+      <span class="top-meta hide-sm" id="dataRange">数据时间：2022-09-01 至 2023-02-28</span>
+      <span class="top-sep hide-sm" aria-hidden="true"></span>
+      <span class="top-meta" id="srcState"><i class="dot" id="srcDot"></i><span id="srcText">当前：连接中</span></span>
+      <span class="top-sep" aria-hidden="true"></span>
+      <button type="button" class="top-act" id="btnTopRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg><span class="hide-sm">刷新</span></button>
+      <span class="top-sep" aria-hidden="true"></span>
+      <div class="user" id="userBox" tabindex="0" role="button" aria-haspopup="menu" aria-expanded="false">
         <span class="avatar" id="avatar">访</span><span id="userName">访客</span><svg class="ic" style="color:var(--ink-4)"><use href="#i-down"/></svg>
-        <div class="menu-pop" id="userPop">
+        <div class="menu-pop" id="userPop" role="menu">
           <div class="info"><div id="popName">访客</div><div id="popRole">访客</div></div>
-          <div class="item" id="menuLogin">切换账号 / 登录</div>
-          <div class="item" id="menuLogout">退出登录</div>
+          <button type="button" class="item" id="menuLogin" role="menuitem">切换账号 / 登录</button>
+          <button type="button" class="item" id="menuLogout" role="menuitem">退出登录</button>
         </div>
       </div>
     </div>
@@ -635,7 +640,7 @@
     <ul class="nav">
       <li data-route="audit"><svg class="ic"><use href="#i-audit"/></svg><span>操作日志</span></li>
     </ul>
-    <div class="collapse" id="btnFold"><svg class="ic"><use href="#i-fold"/></svg><span>收起菜单</span></div>
+    <button type="button" class="collapse" id="btnFold"><svg class="ic"><use href="#i-fold"/></svg><span>收起菜单</span></button>
   </aside>
 
   <main class="main"><div class="main-inner">
@@ -2613,8 +2618,30 @@
       renderAlerts();
       if ($("view-audit").classList.contains("active")) loadAudit();
     }
-    $("userBox").onclick = e => { if (e.target.closest(".menu-pop .info")) return; $("userPop").classList.toggle("open"); };
-    document.addEventListener("click", e => { if (!e.target.closest("#userBox")) $("userPop").classList.remove("open"); });
+    $("userBox").onclick = e => {
+      if (e.target.closest(".menu-pop .info")) return;
+      const open = $("userPop").classList.toggle("open");
+      $("userBox").setAttribute("aria-expanded", String(open));
+    };
+    $("userBox").onkeydown = e => {
+      if ((e.key === "Enter" || e.key === " ") && e.target === $("userBox")) {
+        e.preventDefault();
+        const open = $("userPop").classList.toggle("open");
+        $("userBox").setAttribute("aria-expanded", String(open));
+      } else if (e.key === "Escape") {
+        $("userPop").classList.remove("open");
+        $("userBox").setAttribute("aria-expanded", "false");
+      }
+    };
+    document.addEventListener("click", e => {
+      if (!e.target.closest("#userBox")) {
+        $("userPop").classList.remove("open");
+        $("userBox").setAttribute("aria-expanded", "false");
+      }
+    });
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && $("loginMask").classList.contains("open")) $("loginMask").classList.remove("open");
+    });
     $("menuLogin").onclick = () => { $("loginOut").textContent = ""; $("loginMask").classList.add("open"); };
     $("menuLogout").onclick = async () => {
       const prev = { ...currentUser };
