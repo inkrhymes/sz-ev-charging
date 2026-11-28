@@ -414,15 +414,15 @@
       background:var(--surface);
     }
     .tk-time > div {
-      flex:1 1 130px; display:flex; flex-direction:column; gap:2px; padding:4px 16px;
+      flex:1 1 120px; display:flex; flex-direction:column; gap:2px; padding:4px 12px;
       border-left:1px solid var(--line-soft);
     }
     .tk-time > div:first-child { border-left:0; padding-left:0; }
-    .tk-time b { font-family:var(--font-num); font-size:26px; line-height:30px; font-weight:600; color:var(--ink-1); font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
+    .tk-time b { font-family:var(--font-num); font-size:22px; line-height:28px; font-weight:600; color:var(--ink-1); white-space:nowrap; font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
     .tk-time span { font-size:12px; line-height:18px; color:var(--ink-3); }
 
     .flow { display:flex; gap:0; flex-wrap:wrap; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-ctrl); padding:14px 12px; }
-    .flow .st { position:relative; flex:1; min-width:155px; padding:24px 12px 2px 4px; font-size:12px; line-height:18px; color:var(--ink-3); }
+    .flow .st { position:relative; flex:1; min-width:155px; padding:24px 12px 2px 4px; font-size:12px; line-height:18px; color:var(--ink-3); white-space:normal; word-break:break-word; }
     .flow .st::after { content:""; position:absolute; left:18px; right:0; top:10px; height:2px; background:var(--line); }
     .flow .st:last-child::after { display:none; }
     .flow .st.ok::after { background:var(--plate); }
@@ -568,7 +568,7 @@
     #view-audit table { min-width:900px; }
     #view-peak table { min-width:920px; }
     #view-audit th, #view-audit td { padding-left:10px; padding-right:10px; }
-    #ticketBody td:nth-child(1), #ticketBody td:nth-child(2), #ticketBody td:nth-child(5),
+    #ticketBody tr:not(.flow-row) td:nth-child(1), #ticketBody tr:not(.flow-row) td:nth-child(2), #ticketBody tr:not(.flow-row) td:nth-child(5),
     #seriesBody td:nth-child(1), #seriesBody td:nth-child(2),
     #ovStationBody td:nth-child(1), #mapStations td:nth-child(1), #mapStations td:nth-child(2),
     #rtBody td:nth-child(2) { white-space:nowrap; }
