@@ -200,10 +200,11 @@
     .tip svg { width:14px; height:14px; }
     .tip:hover::after {
       content:attr(data-tip); position:absolute; left:50%; bottom:24px; transform:translateX(-50%);
-      width:max-content; max-width:260px; background:var(--ink-1); color:#F8FAFC;
+      width:max-content; max-width:260px; background:var(--ink-1); color:#FFFFFF;
       font-size:12px; line-height:18px; font-weight:400; padding:8px 11px; border-radius:6px;
       box-shadow:var(--shadow-pop); z-index:45; white-space:normal; pointer-events:none;
     }
+    .kpi .tip:hover::after { bottom:auto; top:22px; left:0; transform:none; max-width:220px; }
     .chart-main { width:100%; height:336px; }
     .chart-sub { width:100%; height:270px; }
 
@@ -242,12 +243,13 @@
     .kpi-label { font-size:12px; line-height:18px; font-weight:400; color:var(--ink-3); display:flex; align-items:center; gap:5px; }
     .kpi-ic { display:none; }
     .kpi-val { font-size:36px; line-height:40px; font-weight:600; letter-spacing:-.01em; color:var(--ink-1); margin-top:6px; white-space:nowrap; }
+    .kpi-val.is-text { font-family:var(--font-body); font-size:24px; line-height:40px; font-weight:600; }
     .kpi-val small { font-family:var(--font-body); font-size:13px; line-height:18px; font-weight:400; color:var(--ink-3); margin-left:4px; letter-spacing:0; }
     .kpi-val.danger { color:var(--red); }
     .kpi-val.warning { color:var(--amber); }
     .kpi-val.teal { color:var(--ink-1); }
     .kpi-val.violet { color:var(--ink-1); }
-    .kpi-foot { font-size:12px; line-height:18px; color:var(--ink-3); margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .kpi-foot { font-size:12px; line-height:18px; color:var(--ink-3); margin-top:6px; }
 
     /* filter + controls */
     .filter { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:12px 18px; margin-bottom:16px; }
@@ -382,19 +384,7 @@
       animation-delay:calc(var(--i, 0) * 25ms);
     }
 
-    /* 次级进度条（仅用于非占用率评分，如缺桩分） */
-    .bar-cell { display:inline-flex; align-items:center; justify-content:flex-end; gap:8px; }
-    .bar-cell i { display:inline-block; width:52px; height:4px; background:var(--line-soft); border-radius:2px; overflow:hidden; }
-    .bar-cell i b { display:block; height:100%; border-radius:2px; background:var(--slate); }
-
-    .rank-badge {
-      display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
-      border-radius:var(--radius-tag); font-size:12px; font-weight:600; background:var(--surface-sub); color:var(--ink-3);
-      margin-right:8px;
-    }
-    .rank-badge.top1 { background:var(--amber-tint); color:var(--amber); }
-    .rank-badge.top2 { background:var(--plate-tint); color:var(--plate-strong); }
-    .rank-badge.top3 { background:var(--plate-tint); color:var(--plate); }
+    .rank-num { display:inline-block; min-width:18px; font-size:12px; color:var(--ink-3); margin-right:6px; font-variant-numeric:tabular-nums; }
     .sub-filter { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 20px; border-bottom:1px solid var(--line-soft); flex-wrap:wrap; }
     .sub-filter .tabs { margin:0; border-bottom:0; }
     .empty { text-align:center; color:var(--ink-3); height:96px; font-size:13px; }
@@ -474,10 +464,10 @@
     }
     .tabs div.active em { background:var(--plate-tint); color:var(--plate-strong); }
 
-    /* overview hero city-reading banner — 左侧 40% 主读数，右侧 60% 五列 1px 竖线分隔，DOM 顺序不变 */
+    /* overview hero city-reading banner — 左侧主读数，右侧五列 1px 竖线分隔，DOM 顺序不变 */
     #kpis.grid.kpis6 {
       display:grid;
-      grid-template-columns:40% repeat(5, minmax(0, 1fr));
+      grid-template-columns:36% repeat(5, minmax(0, 1fr));
       grid-template-areas:"hero s1 s2 s3 s4 s5";
       gap:0;
       background:var(--surface);
@@ -485,7 +475,7 @@
       border-radius:var(--radius-card);
       overflow:hidden;
     }
-    #kpis > .kpi { grid-column:auto; border-left:1px solid var(--line-soft); padding:20px 16px; min-height:132px; justify-content:center; }
+    #kpis > .kpi { grid-column:auto; border-left:1px solid var(--line-soft); padding:20px 14px; min-height:132px; justify-content:center; }
     #kpis > .kpi:nth-child(1) { grid-area:s1; }
     #kpis > .kpi:nth-child(2) { grid-area:s2; }
     #kpis > .kpi:nth-child(3) { grid-area:hero; border-left:0; padding:20px 24px; justify-content:space-between; }
@@ -571,12 +561,17 @@
       display:none; z-index:60;
     }
 
-    /* alerts 8-column layout, audit & peak table readability */
-    #view-alerts .card-body, #view-audit .card-body, #view-peak .card-body { overflow-x:auto; }
+    /* alerts 8-column layout, runs, tickets, audit & peak table readability */
+    #view-alerts .card-body, #view-audit .card-body, #view-peak .card-body, #view-runs .card-body { overflow-x:auto; }
     #view-alerts table { width:100%; table-layout:auto; }
+    #view-runs table { min-width:680px; }
     #view-audit table { min-width:900px; }
     #view-peak table { min-width:920px; }
     #view-audit th, #view-audit td { padding-left:10px; padding-right:10px; }
+    #ticketBody td:nth-child(1), #ticketBody td:nth-child(2), #ticketBody td:nth-child(5),
+    #seriesBody td:nth-child(1), #seriesBody td:nth-child(2),
+    #ovStationBody td:nth-child(1), #mapStations td:nth-child(1), #mapStations td:nth-child(2),
+    #rtBody td:nth-child(2) { white-space:nowrap; }
     #alertBody td:nth-child(1), #alertBody td:nth-child(2), #alertBody td:nth-child(3),
     #alertBody td:nth-child(5), #alertBody td:nth-child(6), #alertBody td:nth-child(7),
     #alertBody td:nth-child(8) { white-space:nowrap; }
@@ -657,7 +652,7 @@
       .map-slider-wrap { flex:1; width:auto; min-width:110px; }
       .occ-scale-segs, .occ-scale-ticks { width:180px; }
       .tk-time > div { flex:1 1 46%; border-left:0; border-top:1px solid var(--line-soft); padding:10px 8px; }
-      .tk-time > div:first-child { border-top:0; padding-left:8px; }
+      .tk-time > div:nth-child(1), .tk-time > div:nth-child(2) { border-top:0; }
       .card-body { padding:12px; overflow-x:auto; }
       .card-head { padding:13px 12px 9px; flex-wrap:wrap; gap:4px 10px; }
       .sub-filter { padding:0 12px; }
@@ -826,11 +821,11 @@
         <button class="btn" id="btnFc" type="button">看预测对比</button>
         <span class="readonly-note" id="fcHint">按上方日期看每小时和上一小时的差别</span>
       </div>
-      <div class="grid">
-        <div class="card col-6 kpi tone-teal"><div class="kpi-top"><div class="kpi-label">平均绝对误差 MAE<span class="tip" data-tip="实际值与参考值差多少，越小说明变化越平稳"><svg class="ic"><use href="#i-info"/></svg></span></div><span class="kpi-ic"><svg class="ic"><use href="#i-compare"/></svg></span></div><div class="kpi-val" id="maeVal">-</div><div class="kpi-foot" id="maeFoot"></div></div>
-        <div class="card col-6 kpi tone-warning"><div class="kpi-top"><div class="kpi-label">最大绝对误差</div><span class="kpi-ic"><svg class="ic"><use href="#i-warn"/></svg></span></div><div class="kpi-val" id="maxErrVal">-</div><div class="kpi-foot" id="maxErrFoot"></div></div>
-        <div class="card col-6 kpi tone-indigo"><div class="kpi-top"><div class="kpi-label">样本点数</div><span class="kpi-ic"><svg class="ic"><use href="#i-zone"/></svg></span></div><div class="kpi-val" id="nVal">-</div><div class="kpi-foot">小时粒度</div></div>
-        <div class="card col-6 kpi tone-slate"><div class="kpi-top"><div class="kpi-label">对比片区</div><span class="kpi-ic"><svg class="ic"><use href="#i-map-pin"/></svg></span></div><div class="kpi-val" id="bzVal">-</div><div class="kpi-foot">在「片区分析」中切换</div></div>
+      <div class="grid kpis6">
+        <div class="card col-6 kpi"><div class="kpi-top"><div class="kpi-label">平均绝对误差 MAE<span class="tip" data-tip="实际值与参考值差多少，越小说明变化越平稳"><svg class="ic"><use href="#i-info"/></svg></span></div></div><div class="kpi-val" id="maeVal">-</div><div class="kpi-foot" id="maeFoot"></div></div>
+        <div class="card col-6 kpi"><div class="kpi-top"><div class="kpi-label">最大绝对误差</div></div><div class="kpi-val" id="maxErrVal">-</div><div class="kpi-foot" id="maxErrFoot"></div></div>
+        <div class="card col-6 kpi"><div class="kpi-top"><div class="kpi-label">样本点数</div></div><div class="kpi-val" id="nVal">-</div><div class="kpi-foot">小时粒度</div></div>
+        <div class="card col-6 kpi"><div class="kpi-top"><div class="kpi-label">对比片区</div></div><div class="kpi-val" id="bzVal">-</div><div class="kpi-foot">在「片区分析」中切换</div></div>
       </div>
       <div class="grid" id="fcCards" style="display:none">
         <div class="card col-6 kpi tone-violet"><div class="kpi-top"><div class="kpi-label">预测值平均误差<span class="tip" data-tip="模型预测和实际占用率平均差多少，只算测试时段"><svg class="ic"><use href="#i-info"/></svg></span></div><span class="kpi-ic"><svg class="ic"><use href="#i-pulse"/></svg></span></div><div class="kpi-val violet" id="fcMae">-</div><div class="kpi-foot" id="fcMaeFoot"></div></div>
@@ -1380,9 +1375,7 @@
         tooltip: { valueFormatter: v => v == null ? "—" : (v * 100).toFixed(1) + "%" },
         grid: { left: 46, right: 20, top: 24, bottom: 34 },
         xAxis: { type: "category", data: x, boundaryGap: false, axisLabel: { hideOverlap: true } },
-        yAxis: maxOcc >= 0.65
-          ? { type: "value", min: 0, max: Math.max(0.85, Math.min(1, Math.ceil(maxOcc * 10) / 10)), axisLabel: { formatter: pct } }
-          : { type: "value", min: 0, max: 0.85, axisLabel: { formatter: pct } },
+        yAxis: { type: "value", min: 0, max: maxOcc > 0.8 ? 1 : 0.8, interval: 0.2, axisLabel: { formatter: pct } },
         visualMap: maxOcc > 0.75 ? { show: false, dimension: 1, pieces: [{ lte: 0.75, color: "#0A7D4F" }, { gt: 0.75, color: "#B45309" }] } : undefined,
         series: [{
           name: "占用率", type: "line", data: pts.map(p => p.occupancy),
@@ -1568,7 +1561,7 @@
             data: pts.map(p => pctv(p.mae_lag1))
           }
         ],
-        graphic: pts.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: fcEmptyText, fill: "#6B7872", fontSize: 13 } }],
+        graphic: pts.length ? [] : [{ type: "text", left: "center", top: "middle", style: { text: fcEmptyText, fill: "#6B7872", fontSize: 13, width: Math.max(240, ($("chartFcDaily").clientWidth || 400) - 32), overflow: "break", lineHeight: 20, textAlign: "center" } }],
       }, true);
     }
     $("btnFc").onclick = async () => {
@@ -1895,10 +1888,9 @@
         ],
       }, true);
       const ranked = z.filter(d => d.avg_occupancy != null).sort((a, b) => b.avg_occupancy - a.avg_occupancy).slice(0, 8);
-      $("mapRank").innerHTML = ranked.map((d, i) => {
-        const cls = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
-        return `<tr><td><span class="rank-badge ${cls}">${i + 1}</span><a data-z="${d.taz_id}">片区 ${d.taz_id}</a></td><td class="num">${d.station_count}</td><td class="num">${cellMeter(d.avg_occupancy, { size: "sm" })}</td></tr>`;
-      }).join("") || `<tr><td colspan="3" class="empty">暂无数据</td></tr>`;
+      $("mapRank").innerHTML = ranked.map((d, i) =>
+        `<tr><td><span class="rank-num">${i + 1}</span><a data-z="${d.taz_id}">片区 ${d.taz_id}</a></td><td class="num">${d.station_count}</td><td class="num">${cellMeter(d.avg_occupancy, { size: "sm" })}</td></tr>`
+      ).join("") || `<tr><td colspan="3" class="empty">暂无数据</td></tr>`;
       $("mapRank").querySelectorAll("a[data-z]").forEach(a => a.onclick = () => pickZone(a.dataset.z));
       pickZone(mapZone);
       recolorMap();
@@ -1946,9 +1938,10 @@
       const list = mapData.stations.filter(s => !mapZone || String(s.taz_id) === mapZone).slice(0, mapZone ? 500 : 50);
       charts.chartMap.setOption({ series: [{}, { id: "st", data: mapZone ? list.filter(s => s.lon != null).map(s => ({ value: [s.lon, s.lat], raw: s })) : [] }] });
       $("mapZoneTitle").textContent = mapZone ? `片区 ${mapZone} 里的站` : (mapData.partial ? "站点较多，点地图上的片区查看" : mapData.stations.length > 50 ? `全部片区的站（先列前 50 个，点片区看全部）` : "全部片区的站");
+      const mapStLabel = s => ({ normal: "正常", stuck: "读数异常", high_missing: "缺数偏多" }[s.status] || s.status_label || "—");
       $("mapStations").innerHTML = list.map(s => `<tr><td style="font-weight:500;color:var(--ink-1)">站 ${s.station_id}</td><td>片区 ${s.taz_id}</td><td class="num">${s.total_piles ?? "—"}</td>
         <td class="num">${cellMeter(s.avg_occupancy, { size: "sm" })}</td><td class="num">${s.missing_rate == null ? "—" : pct(s.missing_rate)}</td>
-        <td><span class="tag ${s.status === "normal" ? "success" : s.status === "stuck" ? "danger" : "warning"}">${s.status_label}</span></td></tr>`).join("")
+        <td><span class="tag ${s.status === "normal" ? "success" : s.status === "stuck" ? "danger" : "warning"}">${mapStLabel(s)}</span></td></tr>`).join("")
         || `<tr><td colspan="6" class="empty">${mapData.offline ? "接口连不上，暂时看不到站明细" : "这个片区没有站"}</td></tr>`;
     }
     charts.chartMap.on("click", p => p.seriesIndex === 0 && p.data && p.data.raw && pickZone(String(p.data.raw.taz_id)));
@@ -2170,8 +2163,8 @@
       const page = shown.slice((sitePage - 1) * size, sitePage * size);
       const pctv = v => v == null ? "—" : pct(v);
       $("siteBody").innerHTML = empty ? `<tr><td colspan="7" class="empty">${siteEmptyMsg}</td></tr>`
-        : page.map(r => { const [cn, c, col] = SITE_KIND[r.kind];
-          const gap = r.gap_score == null ? "—" : `<span class="bar-cell">${Math.round(r.gap_score)}<i><b style="width:${Math.min(100, Math.round(r.gap_score))}%;background:${col}"></b></i></span>`;
+        : page.map(r => { const [cn, c] = SITE_KIND[r.kind];
+          const gap = r.gap_score == null ? "—" : `<span class="readout" style="font-size:15px;font-weight:600;color:var(--ink-1)">${Math.round(r.gap_score)}</span>`;
           return `<tr><td class="num">${r.rank ?? "—"}</td><td style="white-space:nowrap"><a data-sz="${escHtml(r.taz_id)}">片区 ${escHtml(r.taz_id)}</a></td><td>${escHtml(r.function_tag || "—")}</td><td class="num">${r.piles ?? "—"}</td><td class="num">${cellMeter(r.peak_occupancy, { size: "sm" })}</td><td class="num">${gap}</td>
             <td><span class="tag ${c}">${cn}${r.kind === "add" ? ` ${r.suggest_add_piles} 根` : ""}</span></td></tr>`
             + (siteOpen.has(String(r.taz_id)) ? `<tr class="detail-row"><td colspan="7"><div class="sub-panel"><div style="color:var(--ink-1);font-weight:500;margin-bottom:4px">${escHtml(r.reason || "暂无说明")}</div><div class="readonly-note">用车需求 ${r.demand_score == null ? "—" : Math.round(r.demand_score)} 分 · 周边桩充足程度 ${r.supply_score == null ? "—" : Math.round(r.supply_score)} 分 · 忙的小时占 ${pctv(r.busy_hours_ratio)} · 全天平均占用率 ${pctv(r.avg_occupancy)}</div></div></td></tr>` : "");
@@ -2301,6 +2294,9 @@
       const top = rtRows.slice(0, 20);
       $("chartRt").style.height = (empty ? 240 : Math.max(180, top.length * 26 + 24)) + "px";
       charts.chartRt.resize();
+      const rtW = $("chartRt").clientWidth || 900;
+      const rtSeg = rtW > 640 ? [18, 13] : [8, 13];
+      const rtGap = rtW > 640 ? 4 : 2;
       charts.chartRt.setOption({
         tooltip: { trigger: "item", formatter: p => { if (!p.data || !p.data.raw) return ""; const z = p.data.raw; return `<div style="font-weight:600;margin-bottom:4px">片区 ${escHtml(z.taz_id)}</div>${hm(z.window_start)}–${hm(z.window_end)} 占用 <b>${(z.occupancy * 100).toFixed(1)}%</b><br>${z.busy_sum ?? "—"} / ${z.piles_sum ?? "—"} 根桩在用`; } },
         grid: { left: 76, right: 58, top: 8, bottom: 8 },
@@ -2318,8 +2314,8 @@
           {
             type: "pictorialBar",
             symbol: "roundRect",
-            symbolSize: [8, 13],
-            symbolMargin: 2,
+            symbolSize: rtSeg,
+            symbolMargin: rtGap,
             symbolRepeat: true,
             symbolClip: true,
             symbolBoundingData: 100,
@@ -2329,8 +2325,8 @@
           {
             type: "pictorialBar",
             symbol: "roundRect",
-            symbolSize: [8, 13],
-            symbolMargin: 2,
+            symbolSize: rtSeg,
+            symbolMargin: rtGap,
             symbolRepeat: true,
             symbolBoundingData: 100,
             silent: true,
@@ -2340,7 +2336,7 @@
             data: top.map(() => 100)
           }
         ],
-        graphic: empty ? [{ type: "text", left: "center", top: "middle", style: { text: rtEmptyMsg, fill: "#6B7872", fontSize: 13 } }] : [],
+        graphic: empty ? [{ type: "text", left: "center", top: "middle", style: { text: rtEmptyMsg, fill: "#6B7872", fontSize: 13, width: Math.max(240, rtW - 32), overflow: "break", lineHeight: 20, textAlign: "center" } }] : [],
       }, true);
       if (empty) { $("rtBody").innerHTML = `<tr><td colspan="6" class="empty">${rtEmptyMsg}</td></tr>`; $("rtPager").innerHTML = ""; return; }
       const size = 10, pages = Math.ceil(rtRows.length / size); if (rtPage > pages) rtPage = pages;
@@ -2748,12 +2744,12 @@
       const c = d.counts || {};
       const roleCn = currentUser.role === "admin" ? "管理员" : "访客（只读）";
       $("auditKpis").innerHTML = [
-        ["当前登录账号", escHtml(currentUser.user || "访客"), roleCn, currentUser.role === "admin" ? "tone-teal" : "tone-indigo", currentUser.role === "admin" ? "teal" : "", "i-shield"],
-        ["审计记录总数", `${c.total ?? d.total ?? 0} <small>条</small>`, d.source === "mysql" ? "存储于 MySQL 审计表" : "本机文件模式实时记录", "tone-indigo", "", "i-audit"],
-        ["成功执行", `${c.ok ?? 0} <small>条</small>`, "登录、告警、工单与导出操作", "tone-teal", "teal", "i-runs"],
-        ["权限拦截", `${c.denied ?? 0} <small>条</small>`, "未登录或只读账号越权写入拦截", "tone-danger", "danger", "i-warn"],
-      ].map(([l, v, f, tone, vc, ic]) =>
-        `<div class="card col-6 kpi ${tone}"><div class="kpi-top"><div class="kpi-label">${l}</div>${kpiIcon(ic)}</div><div class="kpi-val ${vc}">${v}</div><div class="kpi-foot">${escHtml(f)}</div></div>`).join("");
+        ["当前登录账号", escHtml(currentUser.user || "访客"), roleCn, "", "is-text"],
+        ["审计记录总数", `${c.total ?? d.total ?? 0} <small>条</small>`, d.source === "mysql" ? "存储于 MySQL 审计表" : "本机文件模式实时记录", "", ""],
+        ["成功执行", `${c.ok ?? 0} <small>条</small>`, "登录、告警、工单与导出操作", "", ""],
+        ["权限拦截", `${c.denied ?? 0} <small>条</small>`, "未登录或只读账号越权写入拦截", "", "danger"],
+      ].map(([l, v, f, , vc]) =>
+        `<div class="card col-6 kpi"><div class="kpi-top"><div class="kpi-label">${l}</div></div><div class="kpi-val ${vc}">${v}</div><div class="kpi-foot">${escHtml(f)}</div></div>`).join("");
       const authBadge = d.demo_auth_enabled
         ? '<span class="tag success">演示管理员已开启</span>'
         : '<span class="tag warning">演示管理员未开启</span>';
